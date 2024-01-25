@@ -2,7 +2,7 @@
 Klaus didn't like the term "anti-Klaus", so, here we go.
 
 # WandB
-to log the runs I highly encourage you to use --wandb-api-key flag. You can get your key from [here](https://wandb.ai/authorize). I would also suggest to save it as an environment variable.
+to log the runs I highly encourage you to use --wandb flag. If you are not already logged in, you can also pass your API key with --wandb-api-key flag (NOT RECOMMENDED). You can get your key from [here](https://wandb.ai/authorize).
 
 # NNMF mixer
 A good and fast run:

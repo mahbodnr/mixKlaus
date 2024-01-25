@@ -10,10 +10,12 @@ from mixKlaus.network import Net
 from mixKlaus.utils import get_dataloader, get_experiment_name
 
 parser = argparse.ArgumentParser()
+parser.add_argument("--comet", action="store_true", dest="use_comet")
 parser.add_argument(
-    "--comet-api-key", help="API Key for Comet.ml", dest="_comet_api_key"
+    "--comet-api-key", help="API Key for Comet.ml", dest="_comet_api_key", default=None
 )
-parser.add_argument("--wandb-api-key", help="API Key for WandB", dest="_wandb_api_key")
+parser.add_argument("--wandb", action="store_true", dest="use_wandb")
+parser.add_argument("--wandb-api-key", help="API Key for WandB", dest="_wandb_api_key", default=None)
 parser.add_argument(
     "--dataset",
     default="c10",
@@ -154,7 +156,9 @@ if __name__ == "__main__":
     experiment_name = get_experiment_name(args)
     args.experiment_name = experiment_name
     print(f"Experiment: {experiment_name}")
-    if args._comet_api_key:
+    if args.use_comet:
+        if args.use_wandb:
+            print("[WARNING] Both Comet.ml and WandB are enabled. Using Comet.ml.")
         print("[INFO] Log with Comet.ml!")
         logger = pl.loggers.CometLogger(
             api_key=args._comet_api_key,
@@ -163,7 +167,7 @@ if __name__ == "__main__":
             experiment_name=experiment_name,
         )
         del args._comet_api_key # remove the API key from args
-    elif args._wandb_api_key:
+    elif args.use_wandb:
         print("[INFO] Log with WandB!")
         import wandb
 
