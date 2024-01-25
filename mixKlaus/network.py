@@ -3,7 +3,13 @@ import warmup_scheduler
 import torch
 
 from mixKlaus.augmentation import CutMix, MixUp
-from mixKlaus.utils import get_model, get_criterion, get_layer_outputs, get_experiment_tags
+from mixKlaus.utils import (
+    get_model,
+    get_criterion,
+    get_layer_outputs,
+    get_experiment_tags,
+)
+from nnmf.parameters import NonNegativeParameter
 
 
 class Net(pl.LightningModule):
@@ -28,34 +34,44 @@ class Net(pl.LightningModule):
         return self.criterion(out, label)
 
     def configure_optimizers(self):
+        nnmf_params = []
+        other_params = []
+        for name, param in self.model.named_parameters():
+            if isinstance(param, NonNegativeParameter):
+                nnmf_params.append(param)
+            else:
+                other_params.append(param)
+        print(
+            f"Optimizer params:\nNNMF parameters: {len(nnmf_params)}\nOther parameters: {len(other_params)}"
+        )
+
         if self.hparams.optimizer == "adam":
             self.optimizer = torch.optim.Adam(
-                self.model.parameters(),
-                lr=self.hparams.lr,
+                params=[
+                    {"params": other_params, "lr": self.hparams.lr},
+                    {
+                        "params": nnmf_params,
+                        "lr": self.hparams.lr_nnmf,
+                    },
+                ],
                 betas=(self.hparams.beta1, self.hparams.beta2),
                 weight_decay=self.hparams.weight_decay,
             )
         elif self.hparams.optimizer == "sgd":
             self.optimizer = torch.optim.SGD(
-                self.model.parameters(),
-                lr=self.hparams.lr,
-                momentum=self.hparams.beta1,
+                params=[
+                    {"params": other_params, "lr": self.hparams.lr},
+                    {
+                        "params": nnmf_params,
+                        "lr": self.hparams.lr_nnmf,
+                    },
+                ],
+                betas=(self.hparams.beta1, self.hparams.beta2),
                 weight_decay=self.hparams.weight_decay,
             )
         elif self.hparams.optimizer == "madam":
             from nnmf.optimizer import Madam
-            from nnmf.parameters import NonNegativeParameter
 
-            nnmf_params = []
-            other_params = []
-            for name, param in self.model.named_parameters():
-                if isinstance(param, NonNegativeParameter):
-                    nnmf_params.append(param)
-                else:
-                    other_params.append(param)
-            print(
-                f"Optimizer params:\nNNMF parameters: {len(nnmf_params)}\nOther parameters: {len(other_params)}"
-            )
             self.optimizer = Madam(
                 params=[
                     {"params": other_params, "lr": self.hparams.lr},
@@ -224,7 +240,6 @@ class Net(pl.LightningModule):
                             start=min(pos_min, neg_min),
                         )
 
-
     def on_before_optimizer_step(self, optimizer):
         # log gradients once per epoch #TODO: add for wandb
         if (
@@ -285,7 +300,7 @@ class Net(pl.LightningModule):
     def _log_image(self, image):
         # TODO
         pass
-        
+
     def log_free_mem(self):
         free_memory, total_memory = torch.cuda.mem_get_info()
         self.log("free_memory", free_memory)

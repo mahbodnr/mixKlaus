@@ -45,7 +45,7 @@ parser.add_argument(
     choices=["adam", "sgd", "madam"],
 )
 parser.add_argument("--lr", default=1e-3, type=float)
-parser.add_argument("--lr-nnmf", default=1e-2, type=float)
+parser.add_argument("--lr-nnmf", default=1e-3, type=float)
 parser.add_argument("--min-lr", default=1e-5, type=float)
 parser.add_argument("--beta1", default=0.9, type=float)
 parser.add_argument("--beta2", default=0.999, type=float)
@@ -70,7 +70,7 @@ parser.add_argument("--cutmix", action="store_true")
 parser.add_argument("--mixup", action="store_true")
 parser.add_argument(
     "--md-iter",
-    default=7,
+    default=5,
     type=int,
     help="Number of iterations in Matrix Decomposition (MD).",
 )
