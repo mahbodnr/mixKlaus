@@ -10,6 +10,7 @@ from mixKlaus.utils import PowerSoftmax
 from nnmf.parameters import NonNegativeParameter
 
 COMPARISSON_TOLERANCE = 1e-5
+SECURE_TENSOR_MIN = 1e-5
 
 
 class NNMFLayer(nn.Module):
@@ -18,10 +19,13 @@ class NNMFLayer(nn.Module):
         n_iterations,
         backward_method="fixed point",
         h_update_rate=1,
-        sparsity_rate=1,
         keep_h=False,
         activate_secure_tensors=False,
         solver=None,
+        normalize_input=False,
+        normalize_input_dim=None,
+        normalize_reconstruction=False,
+        normalize_reconstruction_dim=None,
     ):
         super().__init__()
         assert n_iterations >= 0 and isinstance(
@@ -40,7 +44,6 @@ class NNMFLayer(nn.Module):
         self.activate_secure_tensors = activate_secure_tensors
         self.h_update_rate = h_update_rate
         self.keep_h = keep_h
-        self.sparsity = PowerSoftmax(sparsity_rate, dim=1)
 
         self.backward = backward_method
         if self.backward == "solver":
@@ -48,14 +51,22 @@ class NNMFLayer(nn.Module):
             self.solver = solver
             self.hook = None
 
+        self.normalize_input = normalize_input
+        self.normalize_input_dim = normalize_input_dim
+        if self.normalize_input and self.normalize_input_dim is None:
+            print(
+                "[WARNING] normalize_input is True but normalize_input_dim is None! This will normalize the entire input tensor (including batch dimension)"
+            )
+        self.normalize_reconstruction = normalize_reconstruction
+        self.normalize_reconstruction_dim = normalize_reconstruction_dim
+        if self.normalize_reconstruction and self.normalize_reconstruction_dim is None:
+            print(
+                "[WARNING] normalize_reconstruction is True but normalize_reconstruction_dim is None! This will normalize the entire reconstruction tensor (including batch dimension)"
+            )
         self.h = None
-        self.normalize_dim = None
 
-    def secure_tensor(self, t):
-        if not self.activate_secure_tensors:
-            return t
-        assert self.normalize_dim is not None, "normalize_dim must be set"
-        return F.normalize(F.relu(t), p=1, dim=self.normalize_dim, eps=1e-20)
+    def _secure_tensor(self, t):
+        return t.clamp_min(SECURE_TENSOR_MIN) if self.activate_secure_tensors else t
 
     @abstractmethod
     def normalize_weights(self):
@@ -84,20 +95,25 @@ class NNMFLayer(nn.Module):
         """
 
     def _nnmf_iteration(self, input):
-        X_r = self._reconstruct(self.h)
-        # X_r = self.secure_tensor(X_r)
-        X_r = F.normalize(X_r.clamp_min(0.0001), p=1, dim=self.normalize_dim, eps=1e-20)
-        nnmf_update = input / (X_r + 1e-12)
+        reconstruct = self._reconstruct(self.h)
+        reconstruct = self._secure_tensor(reconstruct)
+        if self.normalize_reconstruction:
+            reconstruct = F.normalize(
+                reconstruct, p=1, dim=self.normalize_reconstruction_dim, eps=1e-20
+            )
+        nnmf_update = input / reconstruct
         new_h = self.h * self._forward(nnmf_update)
-        h = self.h_update_rate * new_h + (1 - self.h_update_rate) * self.h
+        if self.h_update_rate == 1:
+            h = new_h
+        else:
+            h = self.h_update_rate * new_h + (1 - self.h_update_rate) * self.h
         return self._process_h(h)
 
     def forward(self, input):
-        assert self.normalize_dim is not None, "normalize_dim must be set"
-
         self.normalize_weights()
         self._check_forward(input)
-        input = F.normalize(input, p=1, dim=self.normalize_dim, eps=1e-20)
+        if self.normalize_input:
+            input = F.normalize(input, p=1, dim=self.normalize_input_dim, eps=1e-20)
 
         if (not self.keep_h) or (self.h is None):
             self._reset_h(input)
@@ -143,7 +159,6 @@ class NNMFDense(NNMFLayer):
         n_iterations,
         backward_method="fixed point",
         h_update_rate=1,
-        sparsity_rate=1,
         keep_h=False,
         activate_secure_tensors=False,
     ):
@@ -151,16 +166,18 @@ class NNMFDense(NNMFLayer):
             n_iterations,
             backward_method,
             h_update_rate,
-            sparsity_rate,
             keep_h,
             activate_secure_tensors,
+            normalize_input=True,
+            normalize_input_dim=1,
+            normalize_reconstruction=True,
+            normalize_reconstruction_dim=1,
         )
         self.in_features = in_features
         self.out_features = out_features
         self.n_iterations = n_iterations
 
         self.weight = NonNegativeParameter(torch.rand(out_features, in_features))
-        self.normalize_dim = 1
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -179,9 +196,8 @@ class NNMFDense(NNMFLayer):
         return F.linear(nnmf_update, self.weight)
 
     def _process_h(self, h):
-        h = self.secure_tensor(h)
-        # apply sparsity
-        # h = self.sparsity(F.relu(h))
+        h = self._secure_tensor(h)
+        h = F.normalize(F.relu(h), p=1, dim=1)
         return h
 
     def _check_forward(self, input):
@@ -208,7 +224,6 @@ class NNMFConv2d(NNMFLayer):
         normalize_channels=False,
         backward_method="fixed point",
         h_update_rate=1,
-        sparsity_rate=1,
         keep_h=False,
         activate_secure_tensors=False,
     ):
@@ -216,9 +231,12 @@ class NNMFConv2d(NNMFLayer):
             n_iterations,
             backward_method,
             h_update_rate,
-            sparsity_rate,
             keep_h,
             activate_secure_tensors,
+            normalize_input=True,
+            normalize_input_dim=(1, 2, 3),
+            normalize_reconstruction=True,
+            normalize_reconstruction_dim=(1, 2, 3),
         )
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -228,7 +246,6 @@ class NNMFConv2d(NNMFLayer):
         self.dilation = _pair(dilation)
         self.n_iterations = n_iterations
         self.normalize_channels = normalize_channels
-        self.normalize_dim = (1, 2, 3)
         if self.dilation != (1, 1):
             raise NotImplementedError(
                 "Dilation not implemented for NNMFConv2d, got dilation={self.dilation}"
@@ -261,10 +278,11 @@ class NNMFConv2d(NNMFLayer):
         )
 
     def _process_h(self, h):
+        h = self._secure_tensor(h)
         if self.normalize_channels:
             h = F.normalize(F.relu(h), p=1, dim=1)
         else:
-            h = self.secure_tensor(h)
+            h = self.secure_tensor(h, dim=(1, 2, 3))
         return h
 
     def _reset_h(self, x):
@@ -403,10 +421,8 @@ class NNMFConvTransposed2d(NNMFConv2d):
             stride=self.stride,
             output_padding=self.output_padding,
         )
-        h = self.h_update_rate * new_h + (1 - self.h_update_rate) * h
-        if self.normalize_channels:
-            # h = F.normalize(F.relu(h), p=1, dim=1)
-            h = self.sparsity(F.relu(h))
+        if self.h_update_rate == 1:
+            h = new_h
         else:
-            h = self.secure_tensor(h, dim=(1, 2, 3))
-        return h
+            h = self.h_update_rate * new_h + (1 - self.h_update_rate) * self.h
+        return self._process_h(h)

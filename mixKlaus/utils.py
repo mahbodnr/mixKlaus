@@ -95,6 +95,10 @@ def get_model(args):
             is_cls_token=args.is_cls_token,
             pos_emb=args.pos_emb,
             output_mode=args.output_mode,
+            normalize_input=args.normalize_input,
+            normalize_input_dim=args.normalize_input_dim,
+            normalize_reconstruction=args.normalize_reconstruction,
+            normalize_reconstruction_dim=args.normalize_reconstruction_dim,
         )
     elif args.model_name == "baseline_mixer":
         from mixKlaus.vit import BaselineMixer
@@ -119,7 +123,7 @@ def get_model(args):
         from mixKlaus.cnn import BaselineCNN
 
         net = BaselineCNN(
-            input_shape= (3, 32, 32),
+            input_shape=(3, 32, 32),
             cnn_features=args.cnn_features,
             ann_layers=args.ann_layers,
         )
@@ -144,7 +148,7 @@ def get_model(args):
             fc3_out_features=784,
             routing_iterations=3,
         )
-        
+
     else:
         raise NotImplementedError(f"{args.model_name} is not implemented yet...")
 
@@ -154,7 +158,9 @@ def get_model(args):
 def get_transform(args):
     train_transform = []
     test_transform = []
-    train_transform += [transforms.RandomCrop(size=args.size, padding=args.random_crop_padding)]
+    train_transform += [
+        transforms.RandomCrop(size=args.size, padding=args.random_crop_padding)
+    ]
     if args.dataset != "svhn":
         train_transform += [transforms.RandomHorizontalFlip()]
 
@@ -320,12 +326,17 @@ def get_experiment_name(args):
 
     return experiment_name
 
-random_string = lambda n: ''.join([random.choice(string.ascii_lowercase) for i in range(n)]) 
+
+random_string = lambda n: "".join(
+    [random.choice(string.ascii_lowercase) for i in range(n)]
+)
+
 
 def get_experiment_tags(args):
     tags = [args.model_name]
     # add any other tags here
     return tags
+
 
 class PowerSoftmax(nn.Module):
     def __init__(self, power, dim):
@@ -338,6 +349,7 @@ class PowerSoftmax(nn.Module):
             return F.normalize(x, p=1, dim=self.dim)
         power_x = torch.pow(x, self.power)
         return power_x / torch.sum(power_x, dim=self.dim, keepdim=True)
+
 
 def anderson(f, x0, m=5, max_iter=50, tol=1e-3, lam=1e-4, beta=1.0):
     """Anderson acceleration for fixed point iteration."""

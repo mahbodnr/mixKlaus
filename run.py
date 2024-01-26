@@ -101,9 +101,13 @@ parser.add_argument(
     action="store_true",
     help="Use convolutions for NNMF Mixer global weights.",
 )
+parser.add_argument("--normalize-input-off", action="store_false", dest="normalize_input")
+parser.add_argument("--normalize-input-dim", default=-1, nargs="+", type=int)
+parser.add_argument("--normalize-reconstruction-off", action="store_false", dest="normalize_reconstruction")
+parser.add_argument("--normalize-reconstruction-dim", default=-1, type=int, nargs="+")
 parser.add_argument("--kernel-size", default=3, type=int)
 parser.add_argument("--stride", default=1, type=int)
-parser.add_argument("--padding", default=0, type=int, dest="conv_padding")
+parser.add_argument("--padding", default=1, type=int, dest="conv_padding")
 parser.add_argument(
     "--nnmf_backward",
     type=str,
@@ -111,9 +115,9 @@ parser.add_argument(
     choices=["all_grads", "fixed_point", "solver"],
     help="How to compute gradients for NNMF Layers.",
 )
-parser.add_argument("--no-pos-emb", action="store_false", dest="pos_emb", help="desable positional embedding in the Transformer")
-parser.add_argument("--off-cls-token", action="store_false", dest="is_cls_token", help="desable the <CLS> token in the Transformer")
-parser.add_argument("--output-mode", default="mean", type=str, choices=["mean", "fc"], help="How to compute the output of the Transformer ONLY IF the <CLS> token is off")
+parser.add_argument("--no-pos-emb", action="store_false", dest="pos_emb", help="Desable positional embedding in the Transformer.")
+parser.add_argument("--use-cls-token", action="store_true", dest="is_cls_token", help="Uses the <CLS> token in the Transformer for classification.")
+parser.add_argument("--output-mode", default="mean", type=str, choices=["mean", "fc"], help="How to compute the output of the Transformer ONLY IF the <CLS> token is off.")
 parser.add_argument(
     "--matmul-precision",
     default="medium",

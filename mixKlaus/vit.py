@@ -7,6 +7,7 @@ from mixKlaus.layers import (
     NNMFMixerEncoder,
 )
 
+
 class ViT(nn.Module):
     def __init__(
         self,
@@ -28,7 +29,9 @@ class ViT(nn.Module):
         self.patch = patch  # number of patches in one row(or col)
         self.is_cls_token = is_cls_token
         self.patch_size = img_size // self.patch
-        assert self.patch_size * self.patch == img_size, f"img_size must be divisible by patch. Got {img_size} and {patch}"
+        assert (
+            self.patch_size * self.patch == img_size
+        ), f"img_size must be divisible by patch. Got {img_size} and {patch}"
         f = (img_size // self.patch) ** 2 * in_c  # 48 # patch vec length
         num_tokens = (self.patch**2) + 1 if self.is_cls_token else (self.patch**2)
 
@@ -79,13 +82,14 @@ class ViT(nn.Module):
         out = out.reshape(x.size(0), self.patch**2, -1)
         return out
 
+
 class NNMFMixer(ViT):
     def __init__(
         self,
-        conv : bool,
-        kernel_size : int,
-        stride : int,
-        padding : int,
+        conv: bool,
+        kernel_size: int,
+        stride: int,
+        padding: int,
         nnmf_iterations: int,
         nnmf_backward: str,
         in_c: int = 3,
@@ -101,6 +105,10 @@ class NNMFMixer(ViT):
         is_cls_token: bool = True,
         pos_emb: bool = True,
         output_mode: str = "mean",
+        normalize_input: bool = True,
+        normalize_input_dim: int | None = None,
+        normalize_reconstruction: bool = True,
+        normalize_reconstruction_dim: int | None = None,
     ):
         super(NNMFMixer, self).__init__(
             in_c,
@@ -127,10 +135,14 @@ class NNMFMixer(ViT):
                     dropout=dropout,
                     use_mlp=encoder_mlp,
                     backward_method=nnmf_backward,
-                    conv = conv,
-                    kernel_size = kernel_size,
-                    stride = stride,
-                    padding = padding,
+                    conv=conv,
+                    kernel_size=kernel_size,
+                    stride=stride,
+                    padding=padding,
+                    normalize_input=normalize_input,
+                    normalize_input_dim=normalize_input_dim,
+                    normalize_reconstruction=normalize_reconstruction,
+                    normalize_reconstruction_dim=normalize_reconstruction_dim,
                 )
                 for _ in range(num_layers)
             ]
@@ -149,14 +161,15 @@ class NNMFMixer(ViT):
         if self.is_cls_token:
             out = out[:, 0]
         else:
-            if self.output_mode=="mean":
+            if self.output_mode == "mean":
                 out = out.mean(1)
-            elif self.output_mode=="fc":
+            elif self.output_mode == "fc":
                 out = self.out_fc(out.flatten(1))
             else:
                 raise NotImplementedError
         out = self.fc(out)
         return out
+
 
 class BaselineMixer(ViT):
     def __init__(

@@ -61,6 +61,7 @@ class TransformerEncoder(nn.Module):
                 "Attention map was not saved. Set save_attn_map=True when initializing the model."
             )
 
+
 class MultiHeadSelfAttention(nn.Module):
     def __init__(
         self,
@@ -115,43 +116,53 @@ class NNMFMixerEncoder(TransformerEncoder):
         kernel_size: int | None = None,
         stride: int | None = None,
         padding: int | None = None,
+        normalize_input: bool = True,
+        normalize_input_dim: int | None = -1,
+        normalize_reconstruction: bool = True,
+        normalize_reconstruction_dim: int | None = -1,
     ):
         super(NNMFMixerEncoder, self).__init__(
             features, mlp_hidden, head, dropout, use_mlp
-        )        
+        )
         if conv:
             assert kernel_size is not None
             assert stride is not None
             assert padding is not None
             self.attention = NNMFMixerAttentionHeadsConv(
-                kernel_size= kernel_size,
-                stride= stride,
-                padding= padding,
-                features= features,
+                kernel_size=kernel_size,
+                stride=stride,
+                padding=padding,
+                features=features,
                 seq_len=seq_len,
-                heads= head,
-                n_iterations= n_iterations,
-                backward_method= backward_method,
-                h_update_rate = 1,
-                sparsity_rate = 1,
-                keep_h= False,
-                activate_secure_tensors= True,
-                use_out_proj= use_out_proj,
+                heads=head,
+                n_iterations=n_iterations,
+                backward_method=backward_method,
+                h_update_rate=1,
+                keep_h=False,
+                activate_secure_tensors=True,
+                use_out_proj=use_out_proj,
                 solver=anderson,
+                normalize_input=normalize_input,
+                normalize_input_dim=normalize_input_dim,
+                normalize_reconstruction=normalize_reconstruction,
+                normalize_reconstruction_dim=normalize_reconstruction_dim,
             )
         else:
             self.attention = NNMFMixerAttentionHeads(
-                features= features,
+                features=features,
                 seq_len=seq_len,
-                heads= head,
-                n_iterations= n_iterations,
-                backward_method= backward_method,
-                h_update_rate = 1,
-                sparsity_rate = 1,
-                keep_h= False,
-                activate_secure_tensors= True,
-                use_out_proj= use_out_proj,
+                heads=head,
+                n_iterations=n_iterations,
+                backward_method=backward_method,
+                h_update_rate=1,
+                keep_h=False,
+                activate_secure_tensors=True,
+                use_out_proj=use_out_proj,
                 solver=anderson,
+                normalize_input=normalize_input,
+                normalize_input_dim=normalize_input_dim,
+                normalize_reconstruction=normalize_reconstruction,
+                normalize_reconstruction_dim=normalize_reconstruction_dim,
             )
 
     def forward(self, x):
@@ -161,6 +172,7 @@ class NNMFMixerEncoder(TransformerEncoder):
         if self.mlp is not None:
             out = self.mlp(self.la2(out)) + out
         return out
+
 
 class NNMFMixerAttentionHeads(NNMFLayer):
     def __init__(
@@ -172,36 +184,41 @@ class NNMFMixerAttentionHeads(NNMFLayer):
         use_out_proj: bool = True,
         backward_method: str = "fixed point",
         h_update_rate: float = 1,
-        sparsity_rate: float = 1,
         keep_h: bool = False,
         activate_secure_tensors: bool = True,
         solver=None,
+        normalize_input=True,
+        normalize_input_dim=-1,
+        normalize_reconstruction=True,
+        normalize_reconstruction_dim=-1,
     ):
         super().__init__(
-            n_iterations,
-            backward_method,
-            h_update_rate,
-            sparsity_rate,
-            keep_h,
-            activate_secure_tensors,
-            solver,
+            n_iterations=n_iterations,
+            backward_method=backward_method,
+            h_update_rate=h_update_rate,
+            keep_h=keep_h,
+            activate_secure_tensors=activate_secure_tensors,
+            solver=solver,
+            normalize_input=normalize_input,
+            normalize_input_dim=normalize_input_dim,
+            normalize_reconstruction=normalize_reconstruction,
+            normalize_reconstruction_dim=normalize_reconstruction_dim,
         )
         self.threshold: float = 0.00001
         self.heads: int = heads
-        
+
         self.local_weight: NonNegativeParameter = NonNegativeParameter(
             torch.rand(features // heads, features // heads)
         )
         self.global_weight: NonNegativeParameter = NonNegativeParameter(
             torch.rand(seq_len, seq_len)
         )
-        
+
         self.use_out_proj = use_out_proj
         if self.use_out_proj:
             self.out_project = nn.Linear(features, features)
-        
+
         self.save_attn_map = False
-        self.normalize_dim = -1
         self.reset_parameters()
 
     def reset_parameters(self) -> None:
@@ -237,9 +254,10 @@ class NNMFMixerAttentionHeads(NNMFLayer):
         return torch.einsum("bihf,oi->bohf", x, self.global_weight)
 
     def _process_h(self, h):
-        h = F.normalize(h, p=1, dim=-1)
-        # apply sparsity
-        # h = self.sparsity(F.relu(h))
+        h = self._secure_tensor(h)
+        if self.normalize_reconstruction:
+            h = F.normalize(h, p=1, dim=self.normalize_reconstruction_dim)
+        # TODO: apply sparsity
         return h
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -269,19 +287,25 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
         use_out_proj: bool = True,
         backward_method: str = "fixed point",
         h_update_rate: float = 1,
-        sparsity_rate: float = 1,
         keep_h: bool = False,
         activate_secure_tensors: bool = True,
         solver=None,
+        normalize_input=True,
+        normalize_input_dim=-1,
+        normalize_reconstruction=True,
+        normalize_reconstruction_dim=-1,
     ):
         super().__init__(
-            n_iterations,
-            backward_method,
-            h_update_rate,
-            sparsity_rate,
-            keep_h,
-            activate_secure_tensors,
-            solver,
+            n_iterations=n_iterations,
+            backward_method=backward_method,
+            h_update_rate=h_update_rate,
+            keep_h=keep_h,
+            activate_secure_tensors=activate_secure_tensors,
+            solver=solver,
+            normalize_input=normalize_input,
+            normalize_input_dim=normalize_input_dim,
+            normalize_reconstruction=normalize_reconstruction,
+            normalize_reconstruction_dim=normalize_reconstruction_dim,
         )
         self.threshold: float = 0.00001
         self.heads: int = heads
@@ -293,10 +317,15 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
         )
 
         self.patch_size = int(self.seq_len**0.5)
-        assert self.patch_size**2 == self.seq_len
+        assert (
+            self.patch_size**2 == self.seq_len
+        ), "seq_len does not matches the patch size. Check if you are using an <CLS> token."
         self.kernel_size = kernel_size
         self.stride = stride
         self.padding = padding
+        assert (
+            kernel_size == -(seq_len - 1) * (stride - 1) + 2 * padding + 1
+        ), "Provided kernel size, stride and padding does not apply a 'same padding' convolution to the input with 'seq_len'."
         self.global_weight = nn.Parameter(
             torch.rand(features, self.heads, kernel_size, kernel_size)
         )
@@ -304,9 +333,8 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
         self.use_out_proj = use_out_proj
         if self.use_out_proj:
             self.out_project = nn.Linear(features, features)
-        
+
         self.save_attn_map = False
-        self.normalize_dim = -1
         self.reset_parameters()
 
     def reset_parameters(self) -> None:
@@ -384,9 +412,11 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
         assert (self.local_weight >= 0).all(), self.local_weight.min()
 
     def _process_h(self, h):
-        h = F.normalize(h, p=1, dim=-1)
-        # apply sparsity
-        # h = self.sparsity(F.relu(h))
+        # raise NotImplementedError
+        h = self._secure_tensor(h)
+        if self.normalize_reconstruction:
+            h = F.normalize(h, p=1, dim=self.normalize_reconstruction_dim)
+        # TODO: apply sparsity
         return h
 
 
@@ -397,8 +427,10 @@ class BaselineMixerAttentionHeads(nn.Module):
         self.heads = heads
         self.features = features
         self.seq_len = seq_len
-        self.local_mlp = nn.Linear(features//heads, features//heads)
-        self.global_weight = nn.Parameter(torch.rand(seq_len, seq_len), requires_grad=True)
+        self.local_mlp = nn.Linear(features // heads, features // heads)
+        self.global_weight = nn.Parameter(
+            torch.rand(seq_len, seq_len), requires_grad=True
+        )
         self.out_project = nn.Linear(features, features)
 
     def forward(self, x):
@@ -407,6 +439,7 @@ class BaselineMixerAttentionHeads(nn.Module):
         x = torch.einsum("bihf,oi->bohf", x, self.global_weight)
         x = self.out_project(x.flatten(2))
         return x
+
 
 class BaselineMixerEncoder(TransformerEncoder):
     def __init__(
@@ -427,4 +460,3 @@ class BaselineMixerEncoder(TransformerEncoder):
             seq_len,
             heads,
         )
-

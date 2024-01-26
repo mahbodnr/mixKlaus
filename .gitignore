@@ -1,6 +1,7 @@
 models/*
 logs/*
 wandb
+*.bash
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

@@ -7,5 +7,5 @@ to log the runs I highly encourage you to use --wandb flag. If you are not alrea
 # NNMF mixer
 A good and fast run:
 ```
-python run.py --model-name nnmf_mixer --num-layers 3 --max-epochs=200 --dataset=c10 --patch=8 --md-iter=5 --head=8 --hidden=96 --off-cls-token --wandb-api-key $WANDB_API_KEY
+python run.py --model-name nnmf_mixer --num-layers 3 --max-epochs=200 --dataset=c10 --patch=8 --md-iter=5 --head=8 --hidden=96 --off-cls-token --wandb
 ```
