@@ -46,6 +46,7 @@ parser.add_argument(
 )
 parser.add_argument("--lr", default=1e-3, type=float)
 parser.add_argument("--lr-nnmf", default=1e-3, type=float)
+parser.add_argument("--lr-scheduler", default="cosine_warmup", type=str, choices=["cosine_warmup", "cosine", "none"])
 parser.add_argument("--min-lr", default=1e-5, type=float)
 parser.add_argument("--beta1", default=0.9, type=float)
 parser.add_argument("--beta2", default=0.999, type=float)
