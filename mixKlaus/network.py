@@ -89,25 +89,29 @@ class Net(pl.LightningModule):
         else:
             raise NotImplementedError(f"Unknown optimizer: {self.hparams.optimizer}")
 
-        if self.hparams.lr_scheduler == "cosine_warmup":
-            self.base_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-                self.optimizer, T_max=self.hparams.max_epochs, eta_min=self.hparams.min_lr
-            )
-            self.scheduler = warmup_scheduler.GradualWarmupScheduler(
-                self.optimizer,
-                multiplier=1.0,
-                total_epoch=self.hparams.warmup_epoch,
-                after_scheduler=self.base_scheduler,
-            )
-        elif self.hparams.lr_scheduler == "cosine":
+        if self.hparams.lr_scheduler == "cosine":
             self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
                 self.optimizer, T_max=self.hparams.max_epochs, eta_min=self.hparams.min_lr
             )
-        elif self.hparams.lr_scheduler.lower() in ["none", "constant"]:
+        elif self.hparams.lr_scheduler == "cosine_restart":
+            self.scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+                self.optimizer,
+                T_0=self.hparams.lr_scheduler_T_0,
+                T_mult=self.hparams.lr_scheduler_T_mult,
+                eta_min=self.hparams.min_lr,
+            )
+        elif self.hparams.lr_scheduler.lower() == "none":
             return self.optimizer
         else:
             raise NotImplementedError(
                 f"Unknown lr_scheduler: {self.hparams.lr_scheduler}"
+            )
+        if self.hparams.lr_warmup_epochs>0:
+            self.scheduler = warmup_scheduler.GradualWarmupScheduler(
+                self.optimizer,
+                multiplier=1.0,
+                total_epoch=self.hparams.lr_warmup_epochs,
+                after_scheduler=self.scheduler,
             )
         return [self.optimizer], [self.scheduler]
 
