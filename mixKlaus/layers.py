@@ -350,6 +350,7 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
         self.heads: int = heads
         self.features: int = features
         self.seq_len: int = seq_len
+        self.embed_dim: int = embed_dim
 
         assert embed_dim % heads == 0, f"Incompatible features: {embed_dim} % {heads} != 0"
         self.embed = nn.Linear(features, embed_dim)
@@ -414,7 +415,7 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
 
     def _make_global_weight(self) -> torch.Tensor:
         return F.normalize(
-            self.global_weight.repeat_interleave(self.features // self.heads, dim=1),
+            self.global_weight.repeat_interleave(self.embed_dim // self.heads, dim=1),
             p=1,
             dim=(1, 2, 3),
         )  # output_channels, input_channels, kernel_size, kernel_size
@@ -426,7 +427,7 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
         )  # B, HD, P, P
         h = F.conv_transpose2d(
             h, self.global_weight_conv, stride=self.stride, padding=self.padding
-        )
+        ) # B, HD, P, P
         h = h.flatten(-2).permute(0, 2, 1)  # B, T, HD
         h = h.reshape(h.shape[0], h.shape[1], self.heads, -1)  # B, T, H, D
         return F.linear(h, self.local_weight.t()).flatten(-2)  # B, T, F
