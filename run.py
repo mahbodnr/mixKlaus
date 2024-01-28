@@ -86,6 +86,7 @@ parser.add_argument("--head", default=12, type=int)
 parser.add_argument("--num-layers", default=1, type=int)
 parser.add_argument("--hidden", default=384, type=int)
 parser.add_argument("--embed-dim", default=384, type=int)
+parser.add_argument("--gated", action="store_true")
 parser.add_argument(
     "--mlp-hidden",
     default=384,

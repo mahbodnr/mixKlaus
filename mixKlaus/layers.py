@@ -1,5 +1,3 @@
-from typing import Optional, Tuple, List
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -128,6 +126,7 @@ class NNMFMixerEncoder(TransformerEncoder):
         seq_len: int,
         mlp_hidden: int,
         backward_method: str,
+        gated: bool = False,
         head: int = 8,
         dropout: float = 0.0,
         use_mlp: bool = True,
@@ -163,6 +162,7 @@ class NNMFMixerEncoder(TransformerEncoder):
                 seq_len=seq_len,
                 heads=head,
                 n_iterations=n_iterations,
+                gated=gated,
                 backward_method=backward_method,
                 h_update_rate=1,
                 keep_h=False,
@@ -181,6 +181,7 @@ class NNMFMixerEncoder(TransformerEncoder):
                 seq_len=seq_len,
                 heads=head,
                 n_iterations=n_iterations,
+                gated=gated,
                 backward_method=backward_method,
                 h_update_rate=1,
                 keep_h=False,
@@ -202,6 +203,7 @@ class NNMFMixerAttentionHeads(NNMFLayer):
         embed_dim: int,
         heads: int,
         n_iterations: int,
+        gated: bool = False,
         use_out_proj: bool = True,
         backward_method: str = "fixed point",
         h_update_rate: float = 1,
@@ -228,18 +230,24 @@ class NNMFMixerAttentionHeads(NNMFLayer):
         self.threshold: float = 0.00001
         self.heads: int = heads
 
+        assert embed_dim % heads == 0, f"Incompatible features: {embed_dim} % {heads} != 0"
+        self.embed = nn.Linear(features, embed_dim)
+
         self.local_weight: NonNegativeParameter = NonNegativeParameter(
-            torch.rand(features // heads, features // heads)
+            torch.rand(embed_dim // heads, embed_dim // heads)
         )
         self.global_weight: NonNegativeParameter = NonNegativeParameter(
             torch.rand(seq_len, seq_len)
         )
 
-        assert embed_dim % heads == 0, f"Incompatible features: {embed_dim} % {heads} != 0"
-        self.embed = nn.Linear(features, embed_dim)
+        self.gated = gated
+        if self.gated:
+            self.gate = nn.Linear(features, embed_dim)
+            self.gate_activation = nn.SiLU()
+
         self.use_out_proj = use_out_proj
         if self.use_out_proj:
-            self.out_project = nn.Linear(features, features)
+            self.out_project = nn.Linear(embed_dim, features)
 
         self.save_attn_map = False
         self.reset_parameters()
@@ -284,11 +292,15 @@ class NNMFMixerAttentionHeads(NNMFLayer):
         return h
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.gated:
+            z = self.gate_activation(self.gate(x))
         x = self.embed(x)
         x = torch.clamp(x, min=MINIMUM_POSITIVE)
         x = x.reshape(x.shape[0], x.shape[1], self.heads, -1)  # B, T, H, D
         x = super().forward(x)
         x = x.flatten(-2)
+        if self.gated:
+            x = x * z
         if self.use_out_proj:
             x = self.out_project(x)
         return x
@@ -310,6 +322,7 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
         features: int,
         heads: int,
         n_iterations: int,
+        gated: bool = False,
         use_out_proj: bool = True,
         backward_method: str = "fixed point",
         h_update_rate: float = 1,
@@ -338,8 +351,11 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
         self.features: int = features
         self.seq_len: int = seq_len
 
+        assert embed_dim % heads == 0, f"Incompatible features: {embed_dim} % {heads} != 0"
+        self.embed = nn.Linear(features, embed_dim)
+
         self.local_weight: NonNegativeParameter = NonNegativeParameter(
-            torch.rand(features // heads, features // heads)
+            torch.rand(embed_dim // heads, embed_dim // heads)
         )
 
         self.patch_size = int(self.seq_len**0.5)
@@ -353,15 +369,18 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
             kernel_size == -(seq_len - 1) * (stride - 1) + 2 * padding + 1
         ), "Provided kernel size, stride and padding does not apply a 'same padding' convolution to the input with 'seq_len'."
         self.global_weight = nn.Parameter(
-            torch.rand(features, self.heads, kernel_size, kernel_size)
+            torch.rand(embed_dim, self.heads, kernel_size, kernel_size)
         )
 
-        assert embed_dim % heads == 0, f"Incompatible features: {embed_dim} % {heads} != 0"
-        self.embed = nn.Linear(features, embed_dim)
+
+        self.gated = gated
+        if self.gated:
+            self.gate = nn.Linear(features, embed_dim)
+            self.gate_activation = nn.SiLU()
 
         self.use_out_proj = use_out_proj
         if self.use_out_proj:
-            self.out_project = nn.Linear(features, features)
+            self.out_project = nn.Linear(embed_dim, features)
 
         self.save_attn_map = False
         self.reset_parameters()
@@ -426,10 +445,14 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
         return x
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.gated:
+            z = self.gate_activation(self.gate(x))
         x = self.embed(x)
         self.global_weight_conv = self._make_global_weight()
         x = torch.clamp(x, min=MINIMUM_POSITIVE)
         x = super().forward(x)
+        if self.gated:
+            x = x * z
         if self.use_out_proj:
             x = self.out_project(x)
         return x

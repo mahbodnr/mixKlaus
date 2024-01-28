@@ -91,6 +91,7 @@ def get_model(args):
             num_layers=args.num_layers,
             hidden=args.hidden,
             embed_dim=args.embed_dim,
+            gated=args.gated,
             encoder_mlp=args.use_encoder_mlp,
             mlp_hidden=args.mlp_hidden,
             head=args.head,
