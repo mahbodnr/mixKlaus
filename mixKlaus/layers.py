@@ -142,7 +142,13 @@ class NNMFMixerEncoder(TransformerEncoder):
         normalize_reconstruction_dim: int | None = -1,
     ):
         super(NNMFMixerEncoder, self).__init__(
-            features, mlp_hidden, head, dropout, use_mlp
+            features,
+            embed_dim,
+            mlp_hidden,
+            head=head,
+            dropout=dropout,
+            use_mlp=use_mlp,
+            save_attn_map=False,
         )
         if conv:
             assert kernel_size is not None
@@ -279,7 +285,7 @@ class NNMFMixerAttentionHeads(NNMFLayer):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.embed(x)
-        torch.clamp(x, min=MINIMUM_POSITIVE, max=None, out=x)
+        x = torch.clamp(x, min=MINIMUM_POSITIVE)
         x = x.reshape(x.shape[0], x.shape[1], self.heads, -1)  # B, T, H, D
         x = super().forward(x)
         x = x.flatten(-2)
@@ -422,7 +428,7 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.embed(x)
         self.global_weight_conv = self._make_global_weight()
-        torch.clamp(x, min=MINIMUM_POSITIVE, max=None, out=x)
+        x = torch.clamp(x, min=MINIMUM_POSITIVE)
         x = super().forward(x)
         if self.use_out_proj:
             x = self.out_project(x)
