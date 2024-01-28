@@ -85,6 +85,7 @@ parser.add_argument("--dropout", default=0.0, type=float)
 parser.add_argument("--head", default=12, type=int)
 parser.add_argument("--num-layers", default=1, type=int)
 parser.add_argument("--hidden", default=384, type=int)
+parser.add_argument("--embed-dim", default=384, type=int)
 parser.add_argument(
     "--mlp-hidden",
     default=384,

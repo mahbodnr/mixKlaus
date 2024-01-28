@@ -8,11 +8,13 @@ from nnmf import NNMFLayer, NonNegativeParameter
 
 from mixKlaus.utils import anderson
 
+MINIMUM_POSITIVE = 1e-6
 
 class TransformerEncoder(nn.Module):
     def __init__(
         self,
         features: int,
+        embed_dim: int,
         mlp_hidden: int,
         head: int = 8,
         dropout: float = 0.0,
@@ -22,7 +24,7 @@ class TransformerEncoder(nn.Module):
         super(TransformerEncoder, self).__init__()
         self.la1 = nn.LayerNorm(features)
         self.attention = MultiHeadSelfAttention(
-            features, head=head, dropout=dropout, save_attn_map=save_attn_map
+            features, embed_dim, head=head, dropout=dropout, save_attn_map=save_attn_map
         )
         self.la2 = nn.LayerNorm(features)
         if use_mlp:
@@ -66,6 +68,7 @@ class MultiHeadSelfAttention(nn.Module):
     def __init__(
         self,
         features: int,
+        embed_dim: int,
         head: int = 8,
         dropout: float = 0.0,
         save_attn_map: bool = False,
@@ -73,22 +76,38 @@ class MultiHeadSelfAttention(nn.Module):
         super(MultiHeadSelfAttention, self).__init__()
         self.head = head
         self.features = features
+        self.embed_dim = embed_dim
+        assert (
+            self.embed_dim % self.head == 0
+        ), f"Incompatible features: {self.embed_dim} % {self.head} != 0"
         self.sqrt_d = self.features**0.5
 
-        self.Wq = nn.Linear(features, features)
-        self.Wk = nn.Linear(features, features)
-        self.Wv = nn.Linear(features, features)
+        self.Wq = nn.Linear(features, embed_dim)
+        self.Wk = nn.Linear(features, embed_dim)
+        self.Wv = nn.Linear(features, embed_dim)
 
-        self.out_project = nn.Linear(features, features)
+        self.out_project = nn.Linear(embed_dim, features)
         self.dropout = nn.Dropout(dropout)
 
         self.save_attn_map = save_attn_map
 
     def forward(self, x):
         B, T, _ = x.size()  # (#Batches, #Inputs, #Features)
-        Q = self.Wq(x).view(B, T, self.head, self.features // self.head).transpose(1, 2)
-        K = self.Wk(x).view(B, T, self.head, self.features // self.head).transpose(1, 2)
-        V = self.Wv(x).view(B, T, self.head, self.features // self.head).transpose(1, 2)
+        Q = (
+            self.Wq(x)
+            .view(B, T, self.head, self.embed_dim // self.head)
+            .transpose(1, 2)
+        )
+        K = (
+            self.Wk(x)
+            .view(B, T, self.head, self.embed_dim // self.head)
+            .transpose(1, 2)
+        )
+        V = (
+            self.Wv(x)
+            .view(B, T, self.head, self.embed_dim // self.head)
+            .transpose(1, 2)
+        )
 
         attn_map = F.softmax(
             torch.einsum("bhif, bhjf->bhij", Q, K) / self.sqrt_d, dim=-1
@@ -105,6 +124,7 @@ class NNMFMixerEncoder(TransformerEncoder):
         self,
         n_iterations: int,
         features: int,
+        embed_dim: int,
         seq_len: int,
         mlp_hidden: int,
         backward_method: str,
@@ -133,6 +153,7 @@ class NNMFMixerEncoder(TransformerEncoder):
                 stride=stride,
                 padding=padding,
                 features=features,
+                embed_dim=embed_dim,
                 seq_len=seq_len,
                 heads=head,
                 n_iterations=n_iterations,
@@ -150,6 +171,7 @@ class NNMFMixerEncoder(TransformerEncoder):
         else:
             self.attention = NNMFMixerAttentionHeads(
                 features=features,
+                embed_dim=embed_dim,
                 seq_len=seq_len,
                 heads=head,
                 n_iterations=n_iterations,
@@ -165,20 +187,13 @@ class NNMFMixerEncoder(TransformerEncoder):
                 normalize_reconstruction_dim=normalize_reconstruction_dim,
             )
 
-    def forward(self, x):
-        x = self.la1(x)
-        x = torch.clamp(x, min=0.0001)
-        out = self.attention(x) + x
-        if self.mlp is not None:
-            out = self.mlp(self.la2(out)) + out
-        return out
-
 
 class NNMFMixerAttentionHeads(NNMFLayer):
     def __init__(
         self,
         seq_len: int,
         features: int,
+        embed_dim: int,
         heads: int,
         n_iterations: int,
         use_out_proj: bool = True,
@@ -214,6 +229,8 @@ class NNMFMixerAttentionHeads(NNMFLayer):
             torch.rand(seq_len, seq_len)
         )
 
+        assert embed_dim % heads == 0, f"Incompatible features: {embed_dim} % {heads} != 0"
+        self.embed = nn.Linear(features, embed_dim)
         self.use_out_proj = use_out_proj
         if self.use_out_proj:
             self.out_project = nn.Linear(features, features)
@@ -261,6 +278,8 @@ class NNMFMixerAttentionHeads(NNMFLayer):
         return h
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.embed(x)
+        torch.clamp(x, min=MINIMUM_POSITIVE, max=None, out=x)
         x = x.reshape(x.shape[0], x.shape[1], self.heads, -1)  # B, T, H, D
         x = super().forward(x)
         x = x.flatten(-2)
@@ -278,6 +297,7 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
     def __init__(
         self,
         kernel_size: int,
+        embed_dim: int,
         stride: int,
         padding: int,
         seq_len: int,
@@ -289,12 +309,12 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
         h_update_rate: float = 1,
         keep_h: bool = False,
         activate_secure_tensors: bool = True,
-        solver=None,
-        normalize_input=True,
-        normalize_input_dim=-1,
-        normalize_reconstruction=True,
-        normalize_reconstruction_dim=-1,
-    ):
+        solver: callable = None,
+        normalize_input: bool = True,
+        normalize_input_dim: int | None = -1,
+        normalize_reconstruction: bool = True,
+        normalize_reconstruction_dim: int | None = -1,
+    ) -> None:
         super().__init__(
             n_iterations=n_iterations,
             backward_method=backward_method,
@@ -330,6 +350,9 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
             torch.rand(features, self.heads, kernel_size, kernel_size)
         )
 
+        assert embed_dim % heads == 0, f"Incompatible features: {embed_dim} % {heads} != 0"
+        self.embed = nn.Linear(features, embed_dim)
+
         self.use_out_proj = use_out_proj
         if self.use_out_proj:
             self.out_project = nn.Linear(features, features)
@@ -364,14 +387,14 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
             out=self.global_weight.data,
         )
 
-    def _make_global_weight(self):
+    def _make_global_weight(self) -> torch.Tensor:
         return F.normalize(
             self.global_weight.repeat_interleave(self.features // self.heads, dim=1),
             p=1,
             dim=(1, 2, 3),
         )  # output_channels, input_channels, kernel_size, kernel_size
 
-    def _reconstruct(self, h):
+    def _reconstruct(self, h: torch.Tensor) -> torch.Tensor:
         # h: B, T, F (=H*D)
         h = h.reshape(h.shape[0], self.patch_size, self.patch_size, -1).permute(
             0, 3, 1, 2
@@ -383,7 +406,7 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
         h = h.reshape(h.shape[0], h.shape[1], self.heads, -1)  # B, T, H, D
         return F.linear(h, self.local_weight.t()).flatten(-2)  # B, T, F
 
-    def _forward(self, x):
+    def _forward(self, x: torch.Tensor) -> torch.Tensor:
         # x: B, T, F (=H*D)
         x = x.reshape(x.shape[0], x.shape[1], self.heads, -1)  # B, T, H, D
         x = F.linear(x, self.local_weight)
@@ -397,7 +420,9 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
         return x
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.embed(x)
         self.global_weight_conv = self._make_global_weight()
+        torch.clamp(x, min=MINIMUM_POSITIVE, max=None, out=x)
         x = super().forward(x)
         if self.use_out_proj:
             x = self.out_project(x)
@@ -421,12 +446,14 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
 
 
 class BaselineMixerAttentionHeads(nn.Module):
-    def __init__(self, features, seq_len, heads):
+    def __init__(self, features, embed_dim, seq_len, heads):
         super().__init__()
         assert features % heads == 0
         self.heads = heads
         self.features = features
+        self.embed_dim = embed_dim
         self.seq_len = seq_len
+        self.embed = nn.Linear(features, embed_dim)
         self.local_mlp = nn.Linear(features // heads, features // heads)
         self.global_weight = nn.Parameter(
             torch.rand(seq_len, seq_len), requires_grad=True
@@ -434,6 +461,7 @@ class BaselineMixerAttentionHeads(nn.Module):
         self.out_project = nn.Linear(features, features)
 
     def forward(self, x):
+        x = self.embed(x)
         x = x.reshape(x.shape[0], x.shape[1], self.heads, -1)
         x = self.local_mlp(x)
         x = torch.einsum("bihf,oi->bohf", x, self.global_weight)
@@ -446,14 +474,14 @@ class BaselineMixerEncoder(TransformerEncoder):
         self,
         seq_len: int,
         features: int,
-        ffn_features: int,
+        embed_dim: int,
         heads: int,
         mlp_hidden: int,
         dropout: float = 0.0,
         use_mlp: bool = True,
     ):
         super(BaselineMixerEncoder, self).__init__(
-            features, mlp_hidden, heads, dropout, use_mlp
+            features, embed_dim, mlp_hidden, heads, dropout, use_mlp
         )
         self.attention = BaselineMixerAttentionHeads(
             features,

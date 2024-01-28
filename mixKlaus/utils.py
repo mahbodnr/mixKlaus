@@ -68,6 +68,7 @@ def get_model(args):
             mlp_hidden=args.mlp_hidden,
             num_layers=args.num_layers,
             hidden=args.hidden,
+            embed_dim=args.embed_dim,
             head=args.head,
             is_cls_token=args.is_cls_token,
         )
@@ -89,6 +90,7 @@ def get_model(args):
             dropout=args.dropout,
             num_layers=args.num_layers,
             hidden=args.hidden,
+            embed_dim=args.embed_dim,
             encoder_mlp=args.use_encoder_mlp,
             mlp_hidden=args.mlp_hidden,
             head=args.head,
@@ -112,6 +114,7 @@ def get_model(args):
             dropout=args.dropout,
             num_layers=args.num_layers,
             hidden=args.hidden,
+            embed_dim=args.embed_dim,
             encoder_mlp=args.use_encoder_mlp,
             mlp_hidden=args.mlp_hidden,
             head=args.head,

@@ -18,6 +18,7 @@ class ViT(nn.Module):
         dropout: float = 0.0,
         num_layers: int = 12,
         hidden: int = 768,
+        embed_dim: int = 768,
         encoder_mlp: bool = True,
         mlp_hidden: int = 768 * 4,
         head: int = 8,
@@ -44,6 +45,7 @@ class ViT(nn.Module):
             *[
                 TransformerEncoder(
                     features=hidden,
+                    embed_dim=embed_dim,
                     mlp_hidden=mlp_hidden,
                     dropout=dropout,
                     head=head,
@@ -99,6 +101,7 @@ class NNMFMixer(ViT):
         dropout: float = 0.0,
         num_layers: int = 12,
         hidden: int = 768,
+        embed_dim: int = 768,
         encoder_mlp: bool = True,
         mlp_hidden: int = 768 * 4,
         head: int = 8,
@@ -129,6 +132,7 @@ class NNMFMixer(ViT):
                 NNMFMixerEncoder(
                     n_iterations=nnmf_iterations,
                     features=hidden,
+                    embed_dim=embed_dim,
                     seq_len=self.seq_len,
                     mlp_hidden=mlp_hidden,
                     head=head,
@@ -181,6 +185,7 @@ class BaselineMixer(ViT):
         patch: int = 16,
         num_layers: int = 12,
         hidden: int = 768,
+        embed_dim: int = 768,
         encoder_mlp: bool = True,
         mlp_hidden: int = 768 * 4,
         dropout: float = 0.0,
@@ -206,6 +211,7 @@ class BaselineMixer(ViT):
                 BaselineMixerEncoder(
                     seq_len=seq_len,
                     features=hidden,
+                    embed_dim=embed_dim,
                     ffn_features=mlp_hidden,
                     heads=head,
                     mlp_hidden=mlp_hidden,
