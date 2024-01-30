@@ -21,6 +21,7 @@ class NNMFLayer(nn.Module):
         h_update_rate=1,
         keep_h=False,
         activate_secure_tensors=False,
+        return_reconstruction=False,
         solver=None,
         normalize_input=False,
         normalize_input_dim=None,
@@ -42,6 +43,7 @@ class NNMFLayer(nn.Module):
 
         self.n_iterations = n_iterations
         self.activate_secure_tensors = activate_secure_tensors
+        self.return_reconstruction = return_reconstruction
         self.h_update_rate = h_update_rate
         self.keep_h = keep_h
 
@@ -64,6 +66,7 @@ class NNMFLayer(nn.Module):
                 "[WARNING] normalize_reconstruction is True but normalize_reconstruction_dim is None! This will normalize the entire reconstruction tensor (including batch dimension)"
             )
         self.h = None
+        self.reconstruction = None
 
     def _secure_tensor(self, t):
         return t.clamp_min(SECURE_TENSOR_MIN) if self.activate_secure_tensors else t
@@ -89,25 +92,29 @@ class NNMFLayer(nn.Module):
         raise NotImplementedError
 
     @abstractmethod
+    def _process_reconstruction(self, reconstruction):
+        return reconstruction
+
+    @abstractmethod
     def _check_forward(self, input):
         """
         Check that the forward pass is valid
         """
 
     def _nnmf_iteration(self, input):
-        reconstruct = self._reconstruct(self.h)
-        reconstruct = self._secure_tensor(reconstruct)
+        reconstruction = self._reconstruct(self.h)
+        reconstruction = self._secure_tensor(reconstruction)
         if self.normalize_reconstruction:
-            reconstruct = F.normalize(
-                reconstruct, p=1, dim=self.normalize_reconstruction_dim, eps=1e-20
+            reconstruction = F.normalize(
+                reconstruction, p=1, dim=self.normalize_reconstruction_dim, eps=1e-20
             )
-        nnmf_update = input / reconstruct
+        nnmf_update = input / reconstruction
         new_h = self.h * self._forward(nnmf_update)
         if self.h_update_rate == 1:
             h = new_h
         else:
             h = self.h_update_rate * new_h + (1 - self.h_update_rate) * self.h
-        return self._process_h(h)
+        return self._process_h(h), self._process_reconstruction(reconstruction)
 
     def forward(self, input):
         self.normalize_weights()
@@ -120,35 +127,65 @@ class NNMFLayer(nn.Module):
 
         if self.backward == "all_grads":
             for _ in range(self.n_iterations):
-                self.h = self._nnmf_iteration(input)
+                self.h, self.reconstruction = self._nnmf_iteration(input)
 
-        elif self.backward == "fixed_point" or self.backward == "solver":
+        elif self.backward == "fixed_point":
             with torch.no_grad():
-                for _ in range(self.n_iterations - 1):
-                    self.h = self._nnmf_iteration(input)
+                for _ in range(self.n_iterations):
+                    self.h, self.reconstruction = self._nnmf_iteration(input)
 
             if self.training:
-                if self.backward == "solver":
-                    self.h = self.h.requires_grad_()
-                new_h = self._nnmf_iteration(input)
-                if self.backward == "solver":
+                self.h, self.reconstruction = self._nnmf_iteration(input)
 
-                    def backward_hook(grad):
+        elif self.backward == "solver":
+            with torch.no_grad():
+                for _ in range(self.n_iterations):
+                    self.h, self.reconstruction = self._nnmf_iteration(input)
+
+            if self.training:
+                self.h = self.h.requires_grad_()
+                new_h, new_reconstruction = self._nnmf_iteration(input)
+
+                def backward_hook_h(grad):
+                    if self.hook is not None:
+                        self.hook.remove()
+                        torch.cuda.synchronize()
+                    g, self.backward_res = self.solver(
+                        lambda y: torch.autograd.grad(
+                            new_h, self.h, y, retain_graph=True
+                        )[0]
+                        + grad,
+                        torch.zeros_like(grad),
+                    )
+                    return g
+                
+                if self.return_reconstruction:
+                    def backward_hook_reconstruction(grad):
                         if self.hook is not None:
                             self.hook.remove()
                             torch.cuda.synchronize()
                         g, self.backward_res = self.solver(
                             lambda y: torch.autograd.grad(
-                                new_h, self.h, y, retain_graph=True
+                                new_reconstruction, self.h, y, retain_graph=True
                             )[0]
                             + grad,
                             torch.zeros_like(grad),
                         )
                         return g
+                    self.hook_reconstruction = new_reconstruction.register_hook(backward_hook_reconstruction)
 
-                    self.hook = new_h.register_hook(backward_hook)
+                self.hook_h = new_h.register_hook(backward_hook)
                 self.h = new_h
-        return self.h
+                self.reconstruction = new_reconstruction
+        else:
+            raise NotImplementedError(
+                f"backward_method {self.backward} not implemented"
+            )
+
+        if self.return_reconstruction:
+            return self.h, self.reconstruction
+        else:
+            return self.h
 
 
 class NNMFDense(NNMFLayer):
@@ -161,6 +198,7 @@ class NNMFDense(NNMFLayer):
         h_update_rate=1,
         keep_h=False,
         activate_secure_tensors=False,
+        return_reconstruction=False,
     ):
         super().__init__(
             n_iterations,
@@ -168,6 +206,7 @@ class NNMFDense(NNMFLayer):
             h_update_rate,
             keep_h,
             activate_secure_tensors,
+            return_reconstruction,
             normalize_input=True,
             normalize_input_dim=1,
             normalize_reconstruction=True,
@@ -226,6 +265,7 @@ class NNMFConv2d(NNMFLayer):
         h_update_rate=1,
         keep_h=False,
         activate_secure_tensors=False,
+        return_reconstruction=False,
     ):
         super().__init__(
             n_iterations,
@@ -233,6 +273,7 @@ class NNMFConv2d(NNMFLayer):
             h_update_rate,
             keep_h,
             activate_secure_tensors,
+            return_reconstruction,
             normalize_input=True,
             normalize_input_dim=(1, 2, 3),
             normalize_reconstruction=True,
@@ -358,6 +399,7 @@ class NNMFConvTransposed2d(NNMFConv2d):
         h_update_rate=1,
         keep_h=False,
         activate_secure_tensors=False,
+        return_reconstruction=False,
     ):
         super().__init__(
             in_channels,
@@ -372,6 +414,7 @@ class NNMFConvTransposed2d(NNMFConv2d):
             h_update_rate,
             keep_h,
             activate_secure_tensors,
+            return_reconstruction,
         )
         self.output_padding = _pair(output_padding)
         assert (

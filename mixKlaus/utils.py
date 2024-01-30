@@ -82,6 +82,7 @@ def get_model(args):
             stride=args.stride,
             padding=args.conv_padding,
             nnmf_iterations=args.md_iter,
+            nnmf_output=args.nnmf_output,
             nnmf_backward=args.nnmf_backward,
             in_c=args.in_c,
             num_classes=args.num_classes,
@@ -102,6 +103,8 @@ def get_model(args):
             normalize_input_dim=args.normalize_input_dim,
             normalize_reconstruction=args.normalize_reconstruction,
             normalize_reconstruction_dim=args.normalize_reconstruction_dim,
+            normalize_hidden=args.normalize_hidden,
+            normalize_hidden_dim=args.normalize_hidden_dim,
         )
     elif args.model_name == "baseline_mixer":
         from mixKlaus.vit import BaselineMixer

@@ -40,6 +40,7 @@ class TransformerEncoder(nn.Module):
 
     def forward(self, x):
         out = self.attention(self.la1(x)) + x
+        # out = self.attention(x) + x
         if self.mlp is not None:
             out = self.mlp(self.la2(out)) + out
         return out
@@ -125,6 +126,7 @@ class NNMFMixerEncoder(TransformerEncoder):
         embed_dim: int,
         seq_len: int,
         mlp_hidden: int,
+        output: str,
         backward_method: str,
         gated: bool = False,
         head: int = 8,
@@ -139,6 +141,8 @@ class NNMFMixerEncoder(TransformerEncoder):
         normalize_input_dim: int | None = -1,
         normalize_reconstruction: bool = True,
         normalize_reconstruction_dim: int | None = -1,
+        normalize_h: bool = True,
+        normalize_h_dim: int | None = -1,
     ):
         super(NNMFMixerEncoder, self).__init__(
             features,
@@ -163,6 +167,7 @@ class NNMFMixerEncoder(TransformerEncoder):
                 heads=head,
                 n_iterations=n_iterations,
                 gated=gated,
+                output=output,
                 backward_method=backward_method,
                 h_update_rate=1,
                 keep_h=False,
@@ -173,6 +178,8 @@ class NNMFMixerEncoder(TransformerEncoder):
                 normalize_input_dim=normalize_input_dim,
                 normalize_reconstruction=normalize_reconstruction,
                 normalize_reconstruction_dim=normalize_reconstruction_dim,
+                normalize_h=normalize_h,
+                normalize_h_dim=normalize_h_dim,
             )
         else:
             self.attention = NNMFMixerAttentionHeads(
@@ -182,6 +189,7 @@ class NNMFMixerEncoder(TransformerEncoder):
                 heads=head,
                 n_iterations=n_iterations,
                 gated=gated,
+                output=output,
                 backward_method=backward_method,
                 h_update_rate=1,
                 keep_h=False,
@@ -192,6 +200,8 @@ class NNMFMixerEncoder(TransformerEncoder):
                 normalize_input_dim=normalize_input_dim,
                 normalize_reconstruction=normalize_reconstruction,
                 normalize_reconstruction_dim=normalize_reconstruction_dim,
+                normalize_h=normalize_h,
+                normalize_h_dim=normalize_h_dim,
             )
 
 
@@ -203,6 +213,7 @@ class NNMFMixerAttentionHeads(NNMFLayer):
         embed_dim: int,
         heads: int,
         n_iterations: int,
+        output: str,
         gated: bool = False,
         use_out_proj: bool = True,
         backward_method: str = "fixed point",
@@ -214,6 +225,8 @@ class NNMFMixerAttentionHeads(NNMFLayer):
         normalize_input_dim=-1,
         normalize_reconstruction=True,
         normalize_reconstruction_dim=-1,
+        normalize_h=True,
+        normalize_h_dim=-1,
     ):
         super().__init__(
             n_iterations=n_iterations,
@@ -226,9 +239,14 @@ class NNMFMixerAttentionHeads(NNMFLayer):
             normalize_input_dim=normalize_input_dim,
             normalize_reconstruction=normalize_reconstruction,
             normalize_reconstruction_dim=normalize_reconstruction_dim,
+            return_reconstruction=True,
         )
         self.threshold: float = 0.00001
         self.heads: int = heads
+        assert output in ["reconstruction", "hidden"]
+        self.output: str = output
+        self.normalize_h = normalize_h
+        self.normalize_h_dim = normalize_h_dim
 
         assert embed_dim % heads == 0, f"Incompatible features: {embed_dim} % {heads} != 0"
         self.embed = nn.Linear(features, embed_dim)
@@ -286,8 +304,8 @@ class NNMFMixerAttentionHeads(NNMFLayer):
 
     def _process_h(self, h):
         h = self._secure_tensor(h)
-        if self.normalize_reconstruction:
-            h = F.normalize(h, p=1, dim=self.normalize_reconstruction_dim)
+        if self.normalize_h:
+            h = F.normalize(h, p=1, dim=self.normalize_h_dim)
         # TODO: apply sparsity
         return h
 
@@ -297,7 +315,9 @@ class NNMFMixerAttentionHeads(NNMFLayer):
         x = self.embed(x)
         x = torch.clamp(x, min=MINIMUM_POSITIVE)
         x = x.reshape(x.shape[0], x.shape[1], self.heads, -1)  # B, T, H, D
-        x = super().forward(x)
+        out= {}
+        out["hidden"], out["reconstruction"] = super().forward(x)
+        x = out[self.output]
         x = x.flatten(-2)
         if self.gated:
             x = x * z
@@ -322,6 +342,7 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
         features: int,
         heads: int,
         n_iterations: int,
+        output: str,
         gated: bool = False,
         use_out_proj: bool = True,
         backward_method: str = "fixed point",
@@ -333,6 +354,8 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
         normalize_input_dim: int | None = -1,
         normalize_reconstruction: bool = True,
         normalize_reconstruction_dim: int | None = -1,
+        normalize_h: bool = True,
+        normalize_h_dim: int | None = -1,
     ) -> None:
         super().__init__(
             n_iterations=n_iterations,
@@ -345,12 +368,15 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
             normalize_input_dim=normalize_input_dim,
             normalize_reconstruction=normalize_reconstruction,
             normalize_reconstruction_dim=normalize_reconstruction_dim,
+            return_reconstruction=True,
         )
         self.threshold: float = 0.00001
         self.heads: int = heads
         self.features: int = features
         self.seq_len: int = seq_len
         self.embed_dim: int = embed_dim
+        assert output in ["reconstruction", "hidden"]
+        self.output: str = output
 
         assert embed_dim % heads == 0, f"Incompatible features: {embed_dim} % {heads} != 0"
         self.embed = nn.Linear(features, embed_dim)
@@ -451,7 +477,9 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
         x = self.embed(x)
         self.global_weight_conv = self._make_global_weight()
         x = torch.clamp(x, min=MINIMUM_POSITIVE)
-        x = super().forward(x)
+        out= {}
+        out["hidden"], out["reconstruction"] = super().forward(x)
+        x = out[self.output]
         if self.gated:
             x = x * z
         if self.use_out_proj:

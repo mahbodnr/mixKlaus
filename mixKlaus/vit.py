@@ -94,6 +94,7 @@ class NNMFMixer(ViT):
         padding: int,
         nnmf_iterations: int,
         nnmf_backward: str,
+        nnmf_output: str,
         in_c: int = 3,
         num_classes: int = 10,
         img_size: int = 224,
@@ -113,6 +114,8 @@ class NNMFMixer(ViT):
         normalize_input_dim: int | None = None,
         normalize_reconstruction: bool = True,
         normalize_reconstruction_dim: int | None = None,
+        normalize_hidden: bool = True,
+        normalize_hidden_dim: int | None = None,
     ):
         super(NNMFMixer, self).__init__(
             in_c,
@@ -141,6 +144,7 @@ class NNMFMixer(ViT):
                     gated=gated,
                     dropout=dropout,
                     use_mlp=encoder_mlp,
+                    output=nnmf_output,
                     backward_method=nnmf_backward,
                     conv=conv,
                     kernel_size=kernel_size,
@@ -150,6 +154,8 @@ class NNMFMixer(ViT):
                     normalize_input_dim=normalize_input_dim,
                     normalize_reconstruction=normalize_reconstruction,
                     normalize_reconstruction_dim=normalize_reconstruction_dim,
+                    normalize_h=normalize_hidden,
+                    normalize_h_dim=normalize_hidden_dim,
                 )
                 for _ in range(num_layers)
             ]

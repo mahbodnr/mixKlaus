@@ -1,5 +1,4 @@
 import pytorch_lightning as pl
-import warmup_scheduler
 import torch
 
 from mixKlaus.augmentation import CutMix, MixUp
@@ -9,6 +8,7 @@ from mixKlaus.utils import (
     get_layer_outputs,
     get_experiment_tags,
 )
+from mixKlaus.lr_scheduler import GradualWarmupScheduler, StopScheduler
 from nnmf.parameters import NonNegativeParameter
 
 
@@ -48,10 +48,15 @@ class Net(pl.LightningModule):
         if self.hparams.optimizer == "adam":
             self.optimizer = torch.optim.Adam(
                 params=[
-                    {"params": other_params, "lr": self.hparams.lr},
+                    {
+                        "params": other_params,
+                        "lr": self.hparams.lr,
+                        "initial_lr": self.hparams.lr,
+                    },
                     {
                         "params": nnmf_params,
                         "lr": self.hparams.lr_nnmf,
+                        "initial_lr": self.hparams.lr_nnmf,
                     },
                 ],
                 betas=(self.hparams.beta1, self.hparams.beta2),
@@ -60,10 +65,15 @@ class Net(pl.LightningModule):
         elif self.hparams.optimizer == "sgd":
             self.optimizer = torch.optim.SGD(
                 params=[
-                    {"params": other_params, "lr": self.hparams.lr},
+                    {
+                        "params": other_params,
+                        "lr": self.hparams.lr,
+                        "initial_lr": self.hparams.lr,
+                    },
                     {
                         "params": nnmf_params,
                         "lr": self.hparams.lr_nnmf,
+                        "initial_lr": self.hparams.lr_nnmf,
                     },
                 ],
                 betas=(self.hparams.beta1, self.hparams.beta2),
@@ -74,10 +84,15 @@ class Net(pl.LightningModule):
 
             self.optimizer = Madam(
                 params=[
-                    {"params": other_params, "lr": self.hparams.lr},
+                    {
+                        "params": other_params,
+                        "lr": self.hparams.lr,
+                        "initial_lr": self.hparams.lr,
+                    },
                     {
                         "params": nnmf_params,
                         "lr": self.hparams.lr_nnmf,
+                        "initial_lr": self.hparams.lr_nnmf,
                         "nnmf": True,
                         "foreach": False,
                     },
@@ -91,7 +106,12 @@ class Net(pl.LightningModule):
 
         if self.hparams.lr_scheduler == "cosine":
             self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-                self.optimizer, T_max=self.hparams.max_epochs, eta_min=self.hparams.min_lr
+                self.optimizer,
+                T_max=self.hparams.max_epochs
+                if self.hparams.lr_scheduler_T_max is None
+                else self.hparams.lr_scheduler_T_max,
+                eta_min=self.hparams.min_lr,
+                last_epoch=self.hparams.lr_scheduler_last_epoch,
             )
         elif self.hparams.lr_scheduler == "cosine_restart":
             self.scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
@@ -106,12 +126,18 @@ class Net(pl.LightningModule):
             raise NotImplementedError(
                 f"Unknown lr_scheduler: {self.hparams.lr_scheduler}"
             )
-        if self.hparams.lr_warmup_epochs>0:
-            self.scheduler = warmup_scheduler.GradualWarmupScheduler(
+        if self.hparams.lr_warmup_epochs > 0:
+            self.scheduler = GradualWarmupScheduler(
                 self.optimizer,
                 multiplier=1.0,
                 total_epoch=self.hparams.lr_warmup_epochs,
                 after_scheduler=self.scheduler,
+            )
+        if self.hparams.lr_scheduler_stop_epoch is not None:
+            self.scheduler = StopScheduler(
+                self.optimizer,
+                base_scheduler=self.scheduler,
+                stop_epoch=self.hparams.lr_scheduler_stop_epoch,
             )
         return [self.optimizer], [self.scheduler]
 
@@ -133,12 +159,14 @@ class Net(pl.LightningModule):
         )
         self.log("total_params", float(sum(p.numel() for p in self.model.parameters())))
 
-        # Tags:
+        # Tags: #TODO: add for wandb
         tags = self.hparams.tags.split(",")
         tags = [tag.strip() for tag in tags]
-        if not (tags[0] == "" and len(tags) == 1):
-            self.logger.experiment.add_tags(tags)
         if hasattr(self.logger.experiment, "add_tags"):
+            # arg parser tags
+            if not (tags[0] == "" and len(tags) == 1):
+                self.logger.experiment.add_tags(tags)
+            # default tags:
             self.logger.experiment.add_tags(get_experiment_tags(self.hparams))
 
     def _step(self, img, label):
