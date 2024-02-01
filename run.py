@@ -91,6 +91,8 @@ parser.add_argument("--head", default=12, type=int)
 parser.add_argument("--num-layers", default=1, type=int)
 parser.add_argument("--hidden", default=384, type=int)
 parser.add_argument("--embed-dim", default=384, type=int)
+parser.add_argument("--nnmf-hidden", default=None, type=int, help="Number of hidden units in NNMF layers. By default (None), it is set to the same value as hidden.")
+parser.add_argument("--nnmf-seq-len", default=None, type=int, help="Sequence length for NNMF layers. By default (None), it is set to the same value as seq_len of the layer.")
 parser.add_argument("--gated", action="store_true")
 parser.add_argument(
     "--mlp-hidden",

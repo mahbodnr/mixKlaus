@@ -103,11 +103,11 @@ class NNMFLayer(nn.Module):
 
     def _nnmf_iteration(self, input):
         reconstruction = self._reconstruct(self.h)
-        reconstruction = self._secure_tensor(reconstruction)
         if self.normalize_reconstruction:
             reconstruction = F.normalize(
                 reconstruction, p=1, dim=self.normalize_reconstruction_dim, eps=1e-20
             )
+        reconstruction = self._secure_tensor(reconstruction)
         nnmf_update = input / reconstruction
         new_h = self.h * self._forward(nnmf_update)
         if self.h_update_rate == 1:

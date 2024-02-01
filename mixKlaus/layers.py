@@ -8,6 +8,7 @@ from mixKlaus.utils import anderson
 
 MINIMUM_POSITIVE = 1e-6
 
+
 class TransformerEncoder(nn.Module):
     def __init__(
         self,
@@ -128,6 +129,8 @@ class NNMFMixerEncoder(TransformerEncoder):
         mlp_hidden: int,
         output: str,
         backward_method: str,
+        hidden_features: int | None = None,
+        hidden_seq_len: int | None = None,
         gated: bool = False,
         head: int = 8,
         dropout: float = 0.0,
@@ -165,6 +168,7 @@ class NNMFMixerEncoder(TransformerEncoder):
                 embed_dim=embed_dim,
                 seq_len=seq_len,
                 heads=head,
+                hidden_features=hidden_features,
                 n_iterations=n_iterations,
                 gated=gated,
                 output=output,
@@ -186,6 +190,8 @@ class NNMFMixerEncoder(TransformerEncoder):
                 features=features,
                 embed_dim=embed_dim,
                 seq_len=seq_len,
+                hidden_features=hidden_features,
+                hidden_seq_len=hidden_seq_len,
                 heads=head,
                 n_iterations=n_iterations,
                 gated=gated,
@@ -214,6 +220,8 @@ class NNMFMixerAttentionHeads(NNMFLayer):
         heads: int,
         n_iterations: int,
         output: str,
+        hidden_features: int | None = None,
+        hidden_seq_len: int | None = None,
         gated: bool = False,
         use_out_proj: bool = True,
         backward_method: str = "fixed point",
@@ -245,17 +253,26 @@ class NNMFMixerAttentionHeads(NNMFLayer):
         self.heads: int = heads
         assert output in ["reconstruction", "hidden"]
         self.output: str = output
+        self.features: int = features
+        self.seq_len: int = seq_len
+        self.embed_dim: int = embed_dim
+        self.hidden_features: int = (
+            embed_dim if hidden_features is None else hidden_features
+        )
+        assert self.hidden_features > heads and (
+            self.hidden_features % heads == 0
+        ), f"Incompatible hidden features: {self.hidden_features}, having heads: {heads}"
+        self.hidden_seq_len: int = seq_len if hidden_seq_len is None else hidden_seq_len
         self.normalize_h = normalize_h
         self.normalize_h_dim = normalize_h_dim
 
-        assert embed_dim % heads == 0, f"Incompatible features: {embed_dim} % {heads} != 0"
         self.embed = nn.Linear(features, embed_dim)
 
         self.local_weight: NonNegativeParameter = NonNegativeParameter(
-            torch.rand(embed_dim // heads, embed_dim // heads)
+            torch.rand(self.hidden_features // heads, embed_dim // heads)
         )
         self.global_weight: NonNegativeParameter = NonNegativeParameter(
-            torch.rand(seq_len, seq_len)
+            torch.rand(self.hidden_seq_len, seq_len)
         )
 
         self.gated = gated
@@ -292,7 +309,17 @@ class NNMFMixerAttentionHeads(NNMFLayer):
             weight.data = F.normalize(weight.data, p=1, dim=1)
 
     def _reset_h(self, x):
-        self.h = F.normalize(torch.ones_like(x), p=1, dim=-1)
+        self.h = torch.rand(
+            (
+                x.shape[0],
+                self.hidden_seq_len,
+                self.heads,
+                self.hidden_features // self.heads,
+            ),
+            device=x.device,
+        )
+        if self.normalize_h:
+            self.h = F.normalize(self.h, p=1, dim=self.normalize_h_dim)
 
     def _reconstruct(self, h):
         h = torch.einsum("bohf,oi->bihf", h, self.global_weight)
@@ -315,7 +342,7 @@ class NNMFMixerAttentionHeads(NNMFLayer):
         x = self.embed(x)
         x = torch.clamp(x, min=MINIMUM_POSITIVE)
         x = x.reshape(x.shape[0], x.shape[1], self.heads, -1)  # B, T, H, D
-        out= {}
+        out = {}
         out["hidden"], out["reconstruction"] = super().forward(x)
         x = out[self.output]
         x = x.flatten(-2)
@@ -343,6 +370,7 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
         heads: int,
         n_iterations: int,
         output: str,
+        hidden_features: int | None = None,
         gated: bool = False,
         use_out_proj: bool = True,
         backward_method: str = "fixed point",
@@ -375,14 +403,21 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
         self.features: int = features
         self.seq_len: int = seq_len
         self.embed_dim: int = embed_dim
+        self.hidden_features: int = (
+            embed_dim if hidden_features is None else hidden_features
+        )
         assert output in ["reconstruction", "hidden"]
         self.output: str = output
+        self.normalize_h = normalize_h
+        self.normalize_h_dim = normalize_h_dim
 
-        assert embed_dim % heads == 0, f"Incompatible features: {embed_dim} % {heads} != 0"
+        assert self.hidden_features > heads and (
+            self.hidden_features % heads == 0
+        ), f"Incompatible hidden features: {self.hidden_features}, having heads: {heads}"
         self.embed = nn.Linear(features, embed_dim)
 
         self.local_weight: NonNegativeParameter = NonNegativeParameter(
-            torch.rand(embed_dim // heads, embed_dim // heads)
+            torch.rand(self.hidden_features // heads, embed_dim // heads)
         )
 
         self.patch_size = int(self.seq_len**0.5)
@@ -392,13 +427,20 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
         self.kernel_size = kernel_size
         self.stride = stride
         self.padding = padding
-        assert (
-            kernel_size == -(seq_len - 1) * (stride - 1) + 2 * padding + 1
-        ), "Provided kernel size, stride and padding does not apply a 'same padding' convolution to the input with 'seq_len'."
-        self.global_weight = nn.Parameter(
-            torch.rand(embed_dim, self.heads, kernel_size, kernel_size)
+        self.output_size = self.get_output_size(
+            self.patch_size, self.patch_size, kernel_size, stride, padding
         )
-
+        if (
+            self.output_size != (self.patch_size, self.patch_size)
+            and self.output == "hidden"
+        ):
+            print(
+                f"[Warning] Provided kernel size, stride and padding does not apply a 'same padding' convolution to the input with 'seq_len'."
+            )
+        self.hidden_seq_len = self.output_size[0] * self.output_size[1]
+        self.global_weight = nn.Parameter(
+            torch.rand(self.hidden_features, self.heads, kernel_size, kernel_size)
+        )
 
         self.gated = gated
         if self.gated:
@@ -441,35 +483,34 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
 
     def _make_global_weight(self) -> torch.Tensor:
         return F.normalize(
-            self.global_weight.repeat_interleave(self.embed_dim // self.heads, dim=1),
+            self.global_weight.repeat_interleave(self.hidden_features // self.heads, dim=1),
             p=1,
             dim=(1, 2, 3),
         )  # output_channels, input_channels, kernel_size, kernel_size
 
     def _reconstruct(self, h: torch.Tensor) -> torch.Tensor:
-        # h: B, T, F (=H*D)
+        # h: B, T, H, D
         h = h.reshape(h.shape[0], self.patch_size, self.patch_size, -1).permute(
             0, 3, 1, 2
         )  # B, HD, P, P
         h = F.conv_transpose2d(
             h, self.global_weight_conv, stride=self.stride, padding=self.padding
-        ) # B, HD, P, P
+        )  # B, HD, P, P
         h = h.flatten(-2).permute(0, 2, 1)  # B, T, HD
         h = h.reshape(h.shape[0], h.shape[1], self.heads, -1)  # B, T, H, D
-        return F.linear(h, self.local_weight.t()).flatten(-2)  # B, T, F
+        return F.linear(h, self.local_weight.t())  # B, T, H, D
 
     def _forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x: B, T, F (=H*D)
-        x = x.reshape(x.shape[0], x.shape[1], self.heads, -1)  # B, T, H, D
-        x = F.linear(x, self.local_weight)
+        # x: B, T, H, D
+        x = F.linear(x, self.local_weight)  # B, T, H, D
         x = x.reshape(x.shape[0], self.patch_size, self.patch_size, -1).permute(
             0, 3, 1, 2
         )  # B, HD, P, P
         x = F.conv2d(
             x, self.global_weight_conv, stride=self.stride, padding=self.padding
-        )
+        )  # B, HD, P, P
         x = x.flatten(-2).permute(0, 2, 1)  # B, T, HD
-        return x
+        return x.reshape(x.shape[0], x.shape[1], self.heads, -1)  # B, T, H, D
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self.gated:
@@ -477,9 +518,11 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
         x = self.embed(x)
         self.global_weight_conv = self._make_global_weight()
         x = torch.clamp(x, min=MINIMUM_POSITIVE)
-        out= {}
+        x = x.reshape(x.shape[0], x.shape[1], self.heads, -1)  # B, T, H, D
+        out = {}
         out["hidden"], out["reconstruction"] = super().forward(x)
         x = out[self.output]
+        x = x.flatten(-2)
         if self.gated:
             x = x * z
         if self.use_out_proj:
@@ -487,7 +530,17 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
         return x
 
     def _reset_h(self, x):
-        self.h = F.normalize(torch.ones_like(x), p=1, dim=-1)
+        self.h = torch.rand(
+            (
+                x.shape[0],
+                self.hidden_seq_len,
+                self.heads,
+                self.hidden_features // self.heads,
+            ),
+            device=x.device,
+        )
+        if self.normalize_h:
+            self.h = F.normalize(self.h, p=1, dim=self.normalize_h_dim)
 
     def _check_forward(self, input):
         assert (self.global_weight >= 0).all(), self.global_weight.min()
@@ -495,12 +548,17 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
         assert (self.local_weight >= 0).all(), self.local_weight.min()
 
     def _process_h(self, h):
-        # raise NotImplementedError
         h = self._secure_tensor(h)
-        if self.normalize_reconstruction:
-            h = F.normalize(h, p=1, dim=self.normalize_reconstruction_dim)
+        if self.normalize_h:
+            h = F.normalize(h, p=1, dim=self.normalize_h_dim)
         # TODO: apply sparsity
         return h
+
+    @staticmethod
+    def get_output_size(Hin, Win, kernel_size, stride, padding):
+        Hout = (Hin - kernel_size + 2 * padding) // stride + 1
+        Wout = (Win - kernel_size + 2 * padding) // stride + 1
+        return Hout, Wout
 
 
 class BaselineMixerAttentionHeads(nn.Module):

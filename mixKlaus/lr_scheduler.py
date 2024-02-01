@@ -72,7 +72,6 @@ class StopScheduler(lr_scheduler._LRScheduler):
         self.stop_epoch = stop_epoch
         super(StopScheduler, self).__init__(optimizer, last_epoch)
 
-        self.DEBUG = True
 
     def get_lr(self):
         if self.last_epoch < self.stop_epoch:
@@ -85,13 +84,7 @@ class StopScheduler(lr_scheduler._LRScheduler):
             epoch = self.last_epoch + 1
         self.last_epoch = epoch if epoch != 0 else 1  # Fix for PyTorch 1.1.0 and earlier versions
 
-        if self.DEBUG:
-            print(f"StopScheduler is called at epoch {self.last_epoch}, stop_epoch is {self.stop_epoch}")
         if self.last_epoch < self.stop_epoch:
-            if self.DEBUG:
-                print(f"StopScheduler is calling {self.base_scheduler} step function")
             self.base_scheduler.step(epoch)
         else:
-            if self.DEBUG:
-                print(f"StopScheduler stopped {self.base_scheduler}. last_lr is {self._last_lr}")
             self._last_lr = [group['lr'] for group in self.optimizer.param_groups]

@@ -91,6 +91,8 @@ def get_model(args):
             dropout=args.dropout,
             num_layers=args.num_layers,
             hidden=args.hidden,
+            nnmf_hidden=args.nnmf_hidden,
+            nnmf_seq_len=args.nnmf_seq_len,
             embed_dim=args.embed_dim,
             gated=args.gated,
             encoder_mlp=args.use_encoder_mlp,
