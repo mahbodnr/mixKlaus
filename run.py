@@ -107,6 +107,12 @@ parser.add_argument(
     help="Disable MLP in encoder blocks.",
 )
 parser.add_argument(
+    "--nnmf-skip-connection-off",
+    action="store_false",
+    dest="nnmf_skip_connection",
+    help="Disable skip connection in NNMF layers.",
+)
+parser.add_argument(
     "--use-conv",
     action="store_true",
     help="Use convolutions for NNMF Mixer global weights.",

@@ -41,7 +41,6 @@ class TransformerEncoder(nn.Module):
 
     def forward(self, x):
         out = self.attention(self.la1(x)) + x
-        # out = self.attention(x) + x
         if self.mlp is not None:
             out = self.mlp(self.la2(out)) + out
         return out
@@ -132,6 +131,7 @@ class NNMFMixerEncoder(TransformerEncoder):
         hidden_features: int | None = None,
         hidden_seq_len: int | None = None,
         gated: bool = False,
+        skip_connection: bool = True,
         head: int = 8,
         dropout: float = 0.0,
         use_mlp: bool = True,
@@ -210,6 +210,15 @@ class NNMFMixerEncoder(TransformerEncoder):
                 normalize_h_dim=normalize_h_dim,
             )
 
+        self.skip_connection = skip_connection
+
+    def forward(self, x):
+        out = self.attention(x)
+        if self.skip_connection:
+            out = out + x
+        if self.mlp is not None:
+            out = self.mlp(self.la2(out)) + out
+        return out
 
 class NNMFMixerAttentionHeads(NNMFLayer):
     def __init__(

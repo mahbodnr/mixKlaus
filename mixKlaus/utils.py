@@ -97,6 +97,7 @@ def get_model(args):
             gated=args.gated,
             encoder_mlp=args.use_encoder_mlp,
             mlp_hidden=args.mlp_hidden,
+            nnmf_skip_connection=args.nnmf_skip_connection,
             head=args.head,
             is_cls_token=args.is_cls_token,
             pos_emb=args.pos_emb,
