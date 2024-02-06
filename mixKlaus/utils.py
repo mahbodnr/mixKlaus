@@ -78,6 +78,7 @@ def get_model(args):
 
         net = NNMFMixer(
             conv=args.use_conv,
+            dynamic_weight=args.use_dynamic_weight,
             kernel_size=args.kernel_size,
             stride=args.stride,
             padding=args.conv_padding,

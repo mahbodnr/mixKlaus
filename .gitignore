@@ -2,6 +2,8 @@ models/*
 logs/*
 wandb
 *.bash
+tests/
+tmp*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

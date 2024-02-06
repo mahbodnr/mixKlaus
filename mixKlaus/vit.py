@@ -89,6 +89,7 @@ class NNMFMixer(ViT):
     def __init__(
         self,
         conv: bool,
+        dynamic_weight: bool,
         kernel_size: int,
         stride: int,
         padding: int,
@@ -153,6 +154,7 @@ class NNMFMixer(ViT):
                     output=nnmf_output,
                     backward_method=nnmf_backward,
                     conv=conv,
+                    dynamic_weight=dynamic_weight,
                     kernel_size=kernel_size,
                     stride=stride,
                     padding=padding,

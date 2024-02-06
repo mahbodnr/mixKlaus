@@ -17,7 +17,7 @@ class NNMFLayer(nn.Module):
     def __init__(
         self,
         n_iterations,
-        backward_method="fixed point",
+        backward_method="fixed_point",
         h_update_rate=1,
         keep_h=False,
         activate_secure_tensors=False,
@@ -203,13 +203,23 @@ class NNMFLayer(nn.Module):
             return self.h
 
 
+class NNMFLayerDynamicWeight(NNMFLayer):
+    def _nnmf_iteration(self, input):
+        new_h, new_reconstruction = super()._nnmf_iteration(input)
+        self._update_weight(new_h, new_reconstruction, input)
+        return new_h, new_reconstruction
+
+    @abstractmethod
+    def _update_weight(self, h, input):
+        raise NotImplementedError
+
 class NNMFDense(NNMFLayer):
     def __init__(
         self,
         in_features,
         out_features,
         n_iterations,
-        backward_method="fixed point",
+        backward_method="fixed_point",
         h_update_rate=1,
         keep_h=False,
         activate_secure_tensors=False,
@@ -255,15 +265,20 @@ class NNMFDense(NNMFLayer):
         return h
 
     def _check_forward(self, input):
-        assert self.weight.sum(0, keepdim=True).allclose(
+        assert self.weight.sum(1, keepdim=True).allclose(
             torch.ones_like(self.weight), atol=COMPARISSON_TOLERANCE
-        ), self.weight.sum(0)
+        ), self.weight.sum(1)
         assert (self.weight >= 0).all(), self.weight.min()
         assert (input >= 0).all(), input.min()
 
     def normalize_weights(self):
-        self.weight.data = F.normalize(self.weight.data, p=1, dim=0)
+        self.weight.data = F.normalize(self.weight.data, p=1, dim=1)
 
+class NNMFDenseDynamicWeight(NNMFLayerDynamicWeight, NNMFDense):
+    def _update_weight(self, h, reconstruction, input):
+        nnmf_update = input / reconstruction
+        self.weight.data *= F.linear(h.t(), nnmf_update.t())
+        self.normalize_weights()
 
 class NNMFConv2d(NNMFLayer):
     def __init__(
@@ -276,7 +291,7 @@ class NNMFConv2d(NNMFLayer):
         stride=1,
         dilation=1,
         normalize_channels=False,
-        backward_method="fixed point",
+        backward_method="fixed_point",
         h_update_rate=1,
         keep_h=False,
         activate_secure_tensors=False,
@@ -410,7 +425,7 @@ class NNMFConvTransposed2d(NNMFConv2d):
         stride=1,
         dilation=1,
         normalize_channels=False,
-        backward_method="fixed point",
+        backward_method="fixed_point",
         h_update_rate=1,
         keep_h=False,
         activate_secure_tensors=False,

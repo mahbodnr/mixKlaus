@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from nnmf import NNMFLayer, NonNegativeParameter
+from nnmf import NNMFLayer, NonNegativeParameter, NNMFLayerDynamicWeight
 
 from mixKlaus.utils import anderson
 
@@ -137,6 +137,7 @@ class NNMFMixerEncoder(TransformerEncoder):
         use_mlp: bool = True,
         use_out_proj: bool = True,
         conv: bool = False,
+        dynamic_weight: bool = False,
         kernel_size: int | None = None,
         stride: int | None = None,
         padding: int | None = None,
@@ -156,59 +157,89 @@ class NNMFMixerEncoder(TransformerEncoder):
             use_mlp=use_mlp,
             save_attn_map=False,
         )
-        if conv:
-            assert kernel_size is not None
-            assert stride is not None
-            assert padding is not None
-            self.attention = NNMFMixerAttentionHeadsConv(
-                kernel_size=kernel_size,
-                stride=stride,
-                padding=padding,
-                features=features,
-                embed_dim=embed_dim,
-                seq_len=seq_len,
-                heads=head,
-                hidden_features=hidden_features,
-                n_iterations=n_iterations,
-                gated=gated,
-                output=output,
-                backward_method=backward_method,
-                h_update_rate=1,
-                keep_h=False,
-                activate_secure_tensors=True,
-                use_out_proj=use_out_proj,
-                solver=anderson,
-                normalize_input=normalize_input,
-                normalize_input_dim=normalize_input_dim,
-                normalize_reconstruction=normalize_reconstruction,
-                normalize_reconstruction_dim=normalize_reconstruction_dim,
-                normalize_h=normalize_h,
-                normalize_h_dim=normalize_h_dim,
-            )
+        if dynamic_weight:
+            if conv:
+                raise NotImplementedError(
+                    "Dynamic weight is not implemented for convolutional layers."
+                )
+            else:
+                self.attention = NNMFMixerAttentionHeadsDynamicWeights(
+                    seq_len=seq_len,
+                    features=features,
+                    embed_dim=embed_dim,
+                    heads=head,
+                    n_iterations=n_iterations,
+                    output=output,
+                    hidden_features=hidden_features,
+                    hidden_seq_len=hidden_seq_len,
+                    gated=gated,
+                    use_out_proj=use_out_proj,
+                    backward_method=backward_method,
+                    h_update_rate=1,
+                    keep_h=False,
+                    activate_secure_tensors=True,
+                    solver=anderson,
+                    normalize_input=normalize_input,
+                    normalize_input_dim=normalize_input_dim,
+                    normalize_reconstruction=normalize_reconstruction,
+                    normalize_reconstruction_dim=normalize_reconstruction_dim,
+                    normalize_h=normalize_h,
+                    normalize_h_dim=normalize_h_dim,
+                )
         else:
-            self.attention = NNMFMixerAttentionHeads(
-                features=features,
-                embed_dim=embed_dim,
-                seq_len=seq_len,
-                hidden_features=hidden_features,
-                hidden_seq_len=hidden_seq_len,
-                heads=head,
-                n_iterations=n_iterations,
-                gated=gated,
-                output=output,
-                backward_method=backward_method,
-                h_update_rate=1,
-                keep_h=False,
-                activate_secure_tensors=True,
-                use_out_proj=use_out_proj,
-                solver=anderson,
-                normalize_input=normalize_input,
-                normalize_input_dim=normalize_input_dim,
-                normalize_reconstruction=normalize_reconstruction,
-                normalize_reconstruction_dim=normalize_reconstruction_dim,
-                normalize_h=normalize_h,
-                normalize_h_dim=normalize_h_dim,
-            )
+            if conv:
+                assert kernel_size is not None
+                assert stride is not None
+                assert padding is not None
+                self.attention = NNMFMixerAttentionHeadsConv(
+                    kernel_size=kernel_size,
+                    stride=stride,
+                    padding=padding,
+                    features=features,
+                    embed_dim=embed_dim,
+                    seq_len=seq_len,
+                    heads=head,
+                    hidden_features=hidden_features,
+                    n_iterations=n_iterations,
+                    gated=gated,
+                    output=output,
+                    backward_method=backward_method,
+                    h_update_rate=1,
+                    keep_h=False,
+                    activate_secure_tensors=True,
+                    use_out_proj=use_out_proj,
+                    solver=anderson,
+                    normalize_input=normalize_input,
+                    normalize_input_dim=normalize_input_dim,
+                    normalize_reconstruction=normalize_reconstruction,
+                    normalize_reconstruction_dim=normalize_reconstruction_dim,
+                    normalize_h=normalize_h,
+                    normalize_h_dim=normalize_h_dim,
+                )
+            else:
+                self.attention = NNMFMixerAttentionHeads(
+                    features=features,
+                    embed_dim=embed_dim,
+                    seq_len=seq_len,
+                    hidden_features=hidden_features,
+                    hidden_seq_len=hidden_seq_len,
+                    heads=head,
+                    n_iterations=n_iterations,
+                    gated=gated,
+                    output=output,
+                    backward_method=backward_method,
+                    h_update_rate=1,
+                    keep_h=False,
+                    activate_secure_tensors=True,
+                    use_out_proj=use_out_proj,
+                    solver=anderson,
+                    normalize_input=normalize_input,
+                    normalize_input_dim=normalize_input_dim,
+                    normalize_reconstruction=normalize_reconstruction,
+                    normalize_reconstruction_dim=normalize_reconstruction_dim,
+                    normalize_h=normalize_h,
+                    normalize_h_dim=normalize_h_dim,
+                )
 
         self.skip_connection = skip_connection
 
@@ -219,6 +250,7 @@ class NNMFMixerEncoder(TransformerEncoder):
         if self.mlp is not None:
             out = self.mlp(self.la2(out)) + out
         return out
+
 
 class NNMFMixerAttentionHeads(NNMFLayer):
     def __init__(
@@ -233,7 +265,7 @@ class NNMFMixerAttentionHeads(NNMFLayer):
         hidden_seq_len: int | None = None,
         gated: bool = False,
         use_out_proj: bool = True,
-        backward_method: str = "fixed point",
+        backward_method: str = "fixed_point",
         h_update_rate: float = 1,
         keep_h: bool = False,
         activate_secure_tensors: bool = True,
@@ -382,7 +414,7 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
         hidden_features: int | None = None,
         gated: bool = False,
         use_out_proj: bool = True,
-        backward_method: str = "fixed point",
+        backward_method: str = "fixed_point",
         h_update_rate: float = 1,
         keep_h: bool = False,
         activate_secure_tensors: bool = True,
@@ -492,7 +524,9 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
 
     def _make_global_weight(self) -> torch.Tensor:
         return F.normalize(
-            self.global_weight.repeat_interleave(self.hidden_features // self.heads, dim=1),
+            self.global_weight.repeat_interleave(
+                self.hidden_features // self.heads, dim=1
+            ),
             p=1,
             dim=(1, 2, 3),
         )  # output_channels, input_channels, kernel_size, kernel_size
@@ -568,6 +602,94 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
         Hout = (Hin - kernel_size + 2 * padding) // stride + 1
         Wout = (Win - kernel_size + 2 * padding) // stride + 1
         return Hout, Wout
+
+
+class NNMFMixerAttentionHeadsDynamicWeights(
+    NNMFLayerDynamicWeight, NNMFMixerAttentionHeads
+):
+    def __init__(
+        self,
+        seq_len: int,
+        features: int,
+        embed_dim: int,
+        heads: int,
+        n_iterations: int,
+        output: str,
+        hidden_features: int | None = None,
+        hidden_seq_len: int | None = None,
+        gated: bool = False,
+        use_out_proj: bool = True,
+        backward_method: str = "fixed_point",
+        h_update_rate: float = 1,
+        keep_h: bool = False,
+        activate_secure_tensors: bool = True,
+        solver=None,
+        normalize_input=True,
+        normalize_input_dim=-1,
+        normalize_reconstruction=True,
+        normalize_reconstruction_dim=-1,
+        normalize_h=True,
+        normalize_h_dim=-1,
+    ):
+        super().__init__(
+            seq_len=seq_len,
+            features=features,
+            embed_dim=embed_dim,
+            heads=heads,
+            n_iterations=n_iterations,
+            output=output,
+            hidden_features=hidden_features,
+            hidden_seq_len=hidden_seq_len,
+            gated=gated,
+            use_out_proj=use_out_proj,
+            backward_method=backward_method,
+            h_update_rate=h_update_rate,
+            keep_h=keep_h,
+            activate_secure_tensors=activate_secure_tensors,
+            solver=solver,
+            normalize_input=normalize_input,
+            normalize_input_dim=normalize_input_dim,
+            normalize_reconstruction=normalize_reconstruction,
+            normalize_reconstruction_dim=normalize_reconstruction_dim,
+            normalize_h=normalize_h,
+            normalize_h_dim=normalize_h_dim,
+        )
+        del self.global_weight
+
+    def reset_parameters(self) -> None:
+        torch.nn.init.uniform_(self.local_weight, a=0, b=1)
+        self.normalize_weights()
+
+    @torch.no_grad()
+    def normalize_weights(self) -> None:
+        assert self.threshold >= 0
+
+        weight_data = F.normalize(
+            self.local_weight.data, p=1, dim=1
+        )  # May contain negative values if Madam not used
+        torch.clamp(
+            weight_data,
+            min=self.threshold,
+            max=None,
+            out=self.local_weight.data,
+        )
+        self.local_weight.data = F.normalize(self.local_weight.data, p=1, dim=1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        self.global_weight = F.normalize(
+            torch.ones(self.hidden_seq_len, self.seq_len), p=1, dim=1
+        ).to(x.device)
+        return super().forward(x)
+
+    def _update_weight(self, h, reconstruction, input):
+        nnmf_update = input / reconstruction
+        self.global_weight.data *= torch.einsum("bohf,bihf->oi", h, nnmf_update)
+        self.normalize_weights()
+
+    def _check_forward(self, input):
+        assert (self.local_weight >= 0).all(), self.local_weight.min()
+        assert (self.global_weight >= 0).all(), self.global_weight.min()
+        assert (input >= 0).all(), input.min()
 
 
 class BaselineMixerAttentionHeads(nn.Module):
