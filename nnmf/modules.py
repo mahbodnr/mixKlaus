@@ -67,6 +67,7 @@ class NNMFLayer(nn.Module):
             )
         self.h = None
         self.reconstruction = None
+        self.convergence = None
 
     def _secure_tensor(self, t):
         return t.clamp_min(SECURE_TENSOR_MIN) if self.activate_secure_tensors else t
@@ -125,17 +126,31 @@ class NNMFLayer(nn.Module):
         if (not self.keep_h) or (self.h is None):
             self._reset_h(input)
 
+        self.convergence = []
         if self.backward == "all_grads":
             for _ in range(self.n_iterations):
-                self.h, self.reconstruction = self._nnmf_iteration(input)
+                new_h, self.reconstruction = self._nnmf_iteration(input)
+                self.convergence.append(
+                    torch.norm(new_h - self.h, p=1, dim=1).mean().item()
+                )
+                self.h = new_h
 
         elif self.backward == "fixed_point":
             with torch.no_grad():
                 for _ in range(self.n_iterations):
-                    self.h, self.reconstruction = self._nnmf_iteration(input)
+                    new_h, self.reconstruction = self._nnmf_iteration(input)
+                    self.convergence.append(
+                        torch.norm(new_h - self.h, p=1, dim=1).mean().item()
+                    )
+                    self.h = new_h
 
             if self.training:
-                self.h, self.reconstruction = self._nnmf_iteration(input)
+                new_h, self.reconstruction = self._nnmf_iteration(input)
+                self.convergence.append(
+                        torch.norm(new_h - self.h, p=1, dim=1).mean().item()
+                    )
+                self.h = new_h
+
 
         elif self.backward == "solver":
             with torch.no_grad():

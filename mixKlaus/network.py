@@ -1,5 +1,7 @@
 import pytorch_lightning as pl
 import torch
+import wandb
+from matplotlib import pyplot as plt
 
 from mixKlaus.augmentation import CutMix, MixUp
 from mixKlaus.utils import (
@@ -10,6 +12,7 @@ from mixKlaus.utils import (
 )
 from mixKlaus.lr_scheduler import GradualWarmupScheduler, StopScheduler
 from nnmf.parameters import NonNegativeParameter
+from nnmf import NNMFLayer
 
 
 class Net(pl.LightningModule):
@@ -47,6 +50,23 @@ class Net(pl.LightningModule):
 
         if self.hparams.optimizer == "adam":
             self.optimizer = torch.optim.Adam(
+                params=[
+                    {
+                        "params": other_params,
+                        "lr": self.hparams.lr,
+                        "initial_lr": self.hparams.lr,
+                    },
+                    {
+                        "params": nnmf_params,
+                        "lr": self.hparams.lr_nnmf,
+                        "initial_lr": self.hparams.lr_nnmf,
+                    },
+                ],
+                betas=(self.hparams.beta1, self.hparams.beta2),
+                weight_decay=self.hparams.weight_decay,
+            )
+        elif self.hparams.optimizer == "adamw":
+            self.optimizer = torch.optim.AdamW(
                 params=[
                     {
                         "params": other_params,
@@ -152,6 +172,19 @@ class Net(pl.LightningModule):
         print(summary)
 
     def on_train_start(self):
+        # wandb watch model
+        if isinstance(self.logger, pl.loggers.WandbLogger):
+            log = {
+                    (True, False): "gradients",
+                    (True, True): "all",
+                    (False, True): "parameters",
+                    (False, False): None,
+                }[(self.hparams.log_gradients, self.hparams.log_weights)]
+            print(f"[INFO] WandB watch log: {log}")
+            self.logger.watch(
+                self.model,
+                log=log,
+            )
         # Number of parameters:
         self.log(
             "trainable_params",
@@ -209,6 +242,15 @@ class Net(pl.LightningModule):
         return loss
 
     def on_train_epoch_end(self):
+        # log NNMF Converganse
+        if self.hparams.log_nnmf_convergence:
+            if self.hparams.use_wandb:
+                for name, module in self.model.named_modules():
+                    if isinstance(module, NNMFLayer):
+                        fig = plt.figure()
+                        plt.plot(module.convergence)
+                        wandb.log({f"convergence/{name}": fig})
+
         # log learning rate
         for i, param_group in enumerate(self.optimizer.param_groups):
             self.log(f"lr_{i}", param_group["lr"], on_epoch=True)

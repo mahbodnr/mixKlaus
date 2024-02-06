@@ -42,7 +42,7 @@ parser.add_argument(
     "--optimizer",
     default="adam",
     type=str,
-    choices=["adam", "sgd", "madam"],
+    choices=["adam", "sgd", "madam", "adamw"],
 )
 parser.add_argument("--lr", default=1e-3, type=float)
 parser.add_argument("--lr-nnmf", default=1e-3, type=float)
@@ -146,6 +146,7 @@ parser.add_argument(
 parser.add_argument("--log-gradients", action="store_true", help="Save gradients during training.")
 parser.add_argument("--log-gradients-interval", default=250, type=int)
 parser.add_argument("--no-log-weights", action="store_false", dest="log_weights", help="Disable logging weights during training.")
+parser.add_argument("--log-nnmf-convergence", action="store_true", help="Log convergence of NNMF layers during training.")
 parser.add_argument("--model-summary-depth", default=-1, type=int)
 parser.add_argument("--tags", default="", type=str, help="Comma separated tags.")
 parser.add_argument("--seed", default=2045, type=int)  # Singularity is near
