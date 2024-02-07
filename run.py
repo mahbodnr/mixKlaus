@@ -195,7 +195,7 @@ parser.add_argument(
     "--nnmf-output", default="hidden", type=str, choices=["hidden", "reconstruction"]
 )
 parser.add_argument(
-    "--nnmf_backward",
+    "--nnmf-backward",
     type=str,
     default="all_grads",
     choices=["all_grads", "fixed_point", "solver"],

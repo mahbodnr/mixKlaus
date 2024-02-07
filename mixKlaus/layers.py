@@ -159,8 +159,32 @@ class NNMFMixerEncoder(TransformerEncoder):
         )
         if dynamic_weight:
             if conv:
-                raise NotImplementedError(
-                    "Dynamic weight is not implemented for convolutional layers."
+                assert kernel_size is not None
+                assert stride is not None
+                assert padding is not None
+                self.attention = NNMFMixerAttentionHeadsConvDynamicWeights(
+                    kernel_size=kernel_size,
+                    stride=stride,
+                    padding=padding,
+                    features=features,
+                    embed_dim=embed_dim,
+                    seq_len=seq_len,
+                    heads=head,
+                    n_iterations=n_iterations,
+                    gated=gated,
+                    output=output,
+                    hidden_features=hidden_features,
+                    backward_method=backward_method,
+                    h_update_rate=1,
+                    keep_h=False,
+                    activate_secure_tensors=True,
+                    solver=anderson,
+                    normalize_input=normalize_input,
+                    normalize_input_dim=normalize_input_dim,
+                    normalize_reconstruction=normalize_reconstruction,
+                    normalize_reconstruction_dim=normalize_reconstruction_dim,
+                    normalize_h=normalize_h,
+                    normalize_h_dim=normalize_h_dim,
                 )
             else:
                 self.attention = NNMFMixerAttentionHeadsDynamicWeights(
@@ -684,11 +708,119 @@ class NNMFMixerAttentionHeadsDynamicWeights(
     def _update_weight(self, h, reconstruction, input):
         nnmf_update = input / reconstruction
         self.global_weight.data *= torch.einsum("bohf,bihf->oi", h, nnmf_update)
+        self.global_weight = F.normalize(self.global_weight, p=1, dim=1)
+
+
+class NNMFMixerAttentionHeadsConvDynamicWeights(
+    NNMFLayerDynamicWeight, NNMFMixerAttentionHeadsConv
+):
+    def __init__(
+        self,
+        kernel_size: int,
+        embed_dim: int,
+        stride: int,
+        padding: int,
+        seq_len: int,
+        features: int,
+        heads: int,
+        n_iterations: int,
+        output: str,
+        hidden_features: int | None = None,
+        gated: bool = False,
+        use_out_proj: bool = True,
+        backward_method: str = "fixed_point",
+        h_update_rate: float = 1,
+        keep_h: bool = False,
+        activate_secure_tensors: bool = True,
+        solver: callable = None,
+        normalize_input: bool = True,
+        normalize_input_dim: int | None = -1,
+        normalize_reconstruction: bool = True,
+        normalize_reconstruction_dim: int | None = -1,
+        normalize_h: bool = True,
+        normalize_h_dim: int | None = -1,
+    ):
+        super().__init__(
+            kernel_size=kernel_size,
+            embed_dim=embed_dim,
+            stride=stride,
+            padding=padding,
+            seq_len=seq_len,
+            features=features,
+            heads=heads,
+            n_iterations=n_iterations,
+            output=output,
+            hidden_features=hidden_features,
+            gated=gated,
+            use_out_proj=use_out_proj,
+            backward_method=backward_method,
+            h_update_rate=h_update_rate,
+            keep_h=keep_h,
+            activate_secure_tensors=activate_secure_tensors,
+            solver=solver,
+            normalize_input=normalize_input,
+            normalize_input_dim=normalize_input_dim,
+            normalize_reconstruction=normalize_reconstruction,
+            normalize_reconstruction_dim=normalize_reconstruction_dim,
+            normalize_h=normalize_h,
+            normalize_h_dim=normalize_h_dim,
+        )
+        del self.global_weight
+
+    def reset_parameters(self) -> None:
+        torch.nn.init.uniform_(self.local_weight, a=0, b=1)
         self.normalize_weights()
+
+    @torch.no_grad()
+    def normalize_weights(self) -> None:
+        assert self.threshold >= 0
+
+        weight_data = F.normalize(
+            self.local_weight.data, p=1, dim=1
+        )  # May contain negative values if Madam not used
+        torch.clamp(
+            weight_data,
+            min=self.threshold,
+            max=None,
+            out=self.local_weight.data,
+        )
+        self.local_weight.data = F.normalize(self.local_weight.data, p=1, dim=1)
+
+    def _make_global_weight(self) -> torch.Tensor:
+        global_weight_conv = torch.ones(
+            self.hidden_features,
+            self.hidden_features,
+            self.kernel_size,
+            self.kernel_size,
+        ).to(self.input_device)
+        return F.normalize(global_weight_conv, p=1, dim=(1, 2, 3))
+
+    def _update_weight(self, h, reconstruction, input):
+        nnmf_update = input / reconstruction
+        # h:
+        h = h.reshape(h.shape[0], self.patch_size, self.patch_size, -1).permute(
+            3, 0, 1, 2
+        )  # B, T, H, D -> HD, B, P, P
+        nnmf_update = nnmf_update.reshape(
+            nnmf_update.shape[0], self.patch_size, self.patch_size, -1
+        ).permute(
+            3, 0, 1, 2
+        )  # B, T, H, D -> HD, B, P, P
+
+        self.global_weight_conv.data *= torch.conv2d(
+            h, nnmf_update, stride=self.stride, padding=self.padding
+        ) 
+        # TODO: fix weights in each head
+        self.global_weight_conv = F.normalize(
+            self.global_weight_conv, p=1, dim=(1, 2, 3)
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        self.input_device = x.device
+        return super().forward(x)
 
     def _check_forward(self, input):
         assert (self.local_weight >= 0).all(), self.local_weight.min()
-        assert (self.global_weight >= 0).all(), self.global_weight.min()
         assert (input >= 0).all(), input.min()
 
 

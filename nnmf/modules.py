@@ -147,10 +147,9 @@ class NNMFLayer(nn.Module):
             if self.training:
                 new_h, self.reconstruction = self._nnmf_iteration(input)
                 self.convergence.append(
-                        torch.norm(new_h - self.h, p=1, dim=1).mean().item()
-                    )
+                    torch.norm(new_h - self.h, p=1, dim=1).mean().item()
+                )
                 self.h = new_h
-
 
         elif self.backward == "solver":
             with torch.no_grad():
@@ -173,8 +172,9 @@ class NNMFLayer(nn.Module):
                         torch.zeros_like(grad),
                     )
                     return g
-                
+
                 if self.return_reconstruction:
+
                     def backward_hook_reconstruction(grad):
                         if self.hook is not None:
                             self.hook.remove()
@@ -187,7 +187,10 @@ class NNMFLayer(nn.Module):
                             torch.zeros_like(grad),
                         )
                         return g
-                    self.hook_reconstruction = new_reconstruction.register_hook(backward_hook_reconstruction)
+
+                    self.hook_reconstruction = new_reconstruction.register_hook(
+                        backward_hook_reconstruction
+                    )
 
                 self.hook_h = new_h.register_hook(backward_hook)
                 self.h = new_h
@@ -204,6 +207,36 @@ class NNMFLayer(nn.Module):
 
 
 class NNMFLayerDynamicWeight(NNMFLayer):
+    def __init__(
+        self,
+        n_iterations,
+        backward_method="fixed_point",
+        h_update_rate=1,
+        w_update_rate=1,
+        keep_h=False,
+        activate_secure_tensors=False,
+        return_reconstruction=False,
+        solver=None,
+        normalize_input=False,
+        normalize_input_dim=None,
+        normalize_reconstruction=False,
+        normalize_reconstruction_dim=None,
+    ):
+        super().__init__(
+            n_iterations=n_iterations,
+            backward_method=backward_method,
+            h_update_rate=h_update_rate,
+            keep_h=keep_h,
+            activate_secure_tensors=activate_secure_tensors,
+            return_reconstruction=return_reconstruction,
+            solver=solver,
+            normalize_input=normalize_input,
+            normalize_input_dim=normalize_input_dim,
+            normalize_reconstruction=normalize_reconstruction,
+            normalize_reconstruction_dim=normalize_reconstruction_dim,
+        )
+        self.w_update_rate = w_update_rate
+
     def _nnmf_iteration(self, input):
         new_h, new_reconstruction = super()._nnmf_iteration(input)
         self._update_weight(new_h, new_reconstruction, input)
@@ -212,6 +245,7 @@ class NNMFLayerDynamicWeight(NNMFLayer):
     @abstractmethod
     def _update_weight(self, h, input):
         raise NotImplementedError
+
 
 class NNMFDense(NNMFLayer):
     def __init__(
@@ -274,11 +308,42 @@ class NNMFDense(NNMFLayer):
     def normalize_weights(self):
         self.weight.data = F.normalize(self.weight.data, p=1, dim=1)
 
+
 class NNMFDenseDynamicWeight(NNMFLayerDynamicWeight, NNMFDense):
+    def __init__(
+        self,
+        in_features,
+        out_features,
+        n_iterations,
+        backward_method="fixed_point",
+        h_update_rate=1,
+        w_update_rate=1,
+        keep_h=False,
+        activate_secure_tensors=False,
+        return_reconstruction=False,
+    ):
+        NNMFDense.__init__(
+            self,
+            in_features=in_features,
+            out_features=out_features,
+            n_iterations=n_iterations,
+            backward_method=backward_method,
+            h_update_rate=h_update_rate,
+            keep_h=keep_h,
+            activate_secure_tensors=activate_secure_tensors,
+            return_reconstruction=return_reconstruction,
+        )
+        self.w_update_rate = w_update_rate
+
     def _update_weight(self, h, reconstruction, input):
         nnmf_update = input / reconstruction
-        self.weight.data *= F.linear(h.t(), nnmf_update.t())
+        new_weight = self.weight.data * F.linear(h.t(), nnmf_update.t())
+        self.weight.data = (
+            self.w_update_rate * new_weight
+            + (1 - self.w_update_rate) * self.weight.data
+        )
         self.normalize_weights()
+
 
 class NNMFConv2d(NNMFLayer):
     def __init__(
@@ -499,3 +564,94 @@ class NNMFConvTransposed2d(NNMFConv2d):
         else:
             h = self.h_update_rate * new_h + (1 - self.h_update_rate) * self.h
         return self._process_h(h)
+
+
+class FPNNMFLayer(NNMFLayer):
+    """
+    Fixed Point Non-negative Matrix Factorization Layer based on:
+    Fixed Point Algorithm for Solving Nonmonotone Variational Inequalities in Nonnegative Matrix Factorization, Hideaki Iiduka, Shizuka Nishino (2016)
+    https://arxiv.org/abs/1611.00146
+    """
+
+    def _nnmf_iteration(self, input):
+        reconstruction = self._reconstruct(self.h)
+        if self.normalize_reconstruction:
+            reconstruction = F.normalize(
+                reconstruction, p=1, dim=self.normalize_reconstruction_dim, eps=1e-20
+            )
+        reconstruction = self._secure_tensor(reconstruction)
+        st_h = self.compute_st_h()
+        new_h = F.relu(self.h - st_h * self._forward(reconstruction - input))
+        if self.h_update_rate == 1:
+            h = new_h
+        else:
+            h = self.h_update_rate * new_h + (1 - self.h_update_rate) * self.h
+        return self._process_h(h), self._process_reconstruction(reconstruction)
+
+    def compute_st_h(self):
+        raise NotImplementedError
+
+
+class FPNNMFLayerDynamicWeight(FPNNMFLayer):
+    # TODO: add w_update_rate to init
+    def _nnmf_iteration(self, input):
+        new_h, new_reconstruction = super()._nnmf_iteration(input)
+        self._update_weight(new_h, new_reconstruction, input)
+        return new_h, new_reconstruction
+
+    @abstractmethod
+    def _update_weight(self, h, input):
+        raise NotImplementedError
+
+
+class FPNNMFDense(FPNNMFLayer, NNMFDense):
+    def compute_st_h(self):
+        return 2.0 / max(
+            1.0, torch.norm(torch.matmul(self.weight.t(), self.weight), "fro")
+        )
+
+
+class FPNNMFDenseDynamicWeight(FPNNMFLayerDynamicWeight, NNMFDenseDynamicWeight):
+    def __init__(
+        self,
+        in_features,
+        out_features,
+        n_iterations,
+        backward_method="fixed_point",
+        h_update_rate=1,
+        w_update_rate=1,
+        keep_h=False,
+        activate_secure_tensors=False,
+        return_reconstruction=False,
+    ):
+        NNMFDenseDynamicWeight.__init__(
+            self,
+            in_features=in_features,
+            out_features=out_features,
+            n_iterations=n_iterations,
+            backward_method=backward_method,
+            h_update_rate=h_update_rate,
+            w_update_rate=w_update_rate,
+            keep_h=keep_h,
+            activate_secure_tensors=activate_secure_tensors,
+            return_reconstruction=return_reconstruction,
+        )
+
+    def compute_st_h(self):
+        return 2.0 / max(
+            1.0, torch.norm(torch.matmul(self.weight.t(), self.weight), "fro")
+        )
+
+    def compute_st_w(self):
+        return 2.0 / max(1.0, torch.norm(torch.matmul(self.h.t(), self.h), "fro"))
+
+    def _update_weight(self, h, reconstruction, input):
+        st_w = self.compute_st_w()
+        new_weight = F.relu(
+            self.weight - st_w * torch.matmul(h.t(), reconstruction - input)
+        )
+        self.weight.data = (
+            self.w_update_rate * new_weight
+            + (1 - self.w_update_rate) * self.weight.data
+        )
+        self.normalize_weights()
