@@ -708,6 +708,7 @@ class NNMFMixerAttentionHeadsDynamicWeights(
     def _update_weight(self, h, reconstruction, input):
         nnmf_update = input / reconstruction
         self.global_weight.data *= torch.einsum("bohf,bihf->oi", h, nnmf_update)
+        self.global_weight = self._secure_tensor(self.global_weight)
         self.global_weight = F.normalize(self.global_weight, p=1, dim=1)
 
 
@@ -740,7 +741,8 @@ class NNMFMixerAttentionHeadsConvDynamicWeights(
         normalize_h: bool = True,
         normalize_h_dim: int | None = -1,
     ):
-        super().__init__(
+        NNMFMixerAttentionHeadsConv.__init__(
+            self,
             kernel_size=kernel_size,
             embed_dim=embed_dim,
             stride=stride,
@@ -807,10 +809,19 @@ class NNMFMixerAttentionHeadsConvDynamicWeights(
             3, 0, 1, 2
         )  # B, T, H, D -> HD, B, P, P
 
-        self.global_weight_conv.data *= torch.conv2d(
-            h, nnmf_update, stride=self.stride, padding=self.padding
-        ) 
-        # TODO: fix weights in each head
+        # Devide by the batch size to avoid overflow
+        nnmf_update /= nnmf_update.shape[1]
+        h /= h.shape[1]
+
+        new_weight = F.conv2d(
+            h, nnmf_update, stride=self.stride, padding=self.padding, 
+        )
+
+        # TODO: update w rate TODO: fix weights in each head
+        self.global_weight_conv.data *= new_weight
+
+        self.global_weight_conv = self._secure_tensor(self.global_weight_conv)
+
         self.global_weight_conv = F.normalize(
             self.global_weight_conv, p=1, dim=(1, 2, 3)
         )

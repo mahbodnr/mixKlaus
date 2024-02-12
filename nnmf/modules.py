@@ -40,6 +40,10 @@ class NNMFLayer(nn.Module):
             "solver",
             "all_grads",
         ], f"backward_method must be one of 'fixed_point', 'solver', 'all_grads', got {backward_method}"
+        if not activate_secure_tensors:
+            print(
+                "[WARNING] 'activate_secure_tensors' is False! This may lead to numerical instability."
+            )
 
         self.n_iterations = n_iterations
         self.activate_secure_tensors = activate_secure_tensors
@@ -104,12 +108,13 @@ class NNMFLayer(nn.Module):
 
     def _nnmf_iteration(self, input):
         reconstruction = self._reconstruct(self.h)
+        reconstruction = self._secure_tensor(reconstruction)
         if self.normalize_reconstruction:
             reconstruction = F.normalize(
                 reconstruction, p=1, dim=self.normalize_reconstruction_dim, eps=1e-20
             )
-        reconstruction = self._secure_tensor(reconstruction)
         nnmf_update = input / reconstruction
+        assert nnmf_update.isfinite().all() and nnmf_update.isnan().any()==0, (nnmf_update, input, reconstruction, input.isfinite().all(), reconstruction.isfinite().all(), input.isnan().any(), reconstruction.isnan().any(), reconstruction.min(), reconstruction.max())
         new_h = self.h * self._forward(nnmf_update)
         if self.h_update_rate == 1:
             h = new_h
