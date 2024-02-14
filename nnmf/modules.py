@@ -72,6 +72,7 @@ class NNMFLayer(nn.Module):
         self.h = None
         self.reconstruction = None
         self.convergence = None
+        self.reconstruction_mse = None
 
     def _secure_tensor(self, t):
         return t.clamp_min(SECURE_TENSOR_MIN) if self.activate_secure_tensors else t
@@ -132,11 +133,15 @@ class NNMFLayer(nn.Module):
             self._reset_h(input)
 
         self.convergence = []
+        self.reconstruction_mse = []
         if self.backward == "all_grads":
             for _ in range(self.n_iterations):
                 new_h, self.reconstruction = self._nnmf_iteration(input)
                 self.convergence.append(
-                    torch.norm(new_h - self.h, p=1, dim=1).mean().item()
+                    F.mse_loss(new_h, self.h)
+                )
+                self.reconstruction_mse.append(
+                    F.mse_loss(self.reconstruction, input)
                 )
                 self.h = new_h
 
@@ -147,12 +152,18 @@ class NNMFLayer(nn.Module):
                     self.convergence.append(
                         torch.norm(new_h - self.h, p=1, dim=1).mean().item()
                     )
+                    self.reconstruction_mse.append(
+                        F.mse_loss(self.reconstruction - input)
+                    )
                     self.h = new_h
 
             if self.training:
                 new_h, self.reconstruction = self._nnmf_iteration(input)
                 self.convergence.append(
                     torch.norm(new_h - self.h, p=1, dim=1).mean().item()
+                )
+                self.reconstruction_mse.append(
+                    F.mse_loss(self.reconstruction - input)
                 )
                 self.h = new_h
 
@@ -227,7 +238,8 @@ class NNMFLayerDynamicWeight(NNMFLayer):
         normalize_reconstruction=False,
         normalize_reconstruction_dim=None,
     ):
-        super().__init__(
+        NNMFLayer.__init__(
+            self,
             n_iterations=n_iterations,
             backward_method=backward_method,
             h_update_rate=h_update_rate,

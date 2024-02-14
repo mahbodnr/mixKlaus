@@ -241,6 +241,8 @@ parser.add_argument(
     action="store_true",
     help="Log convergence of NNMF layers during training.",
 )
+parser.add_argument("--log-sparsity", action="store_true", help="Log sparsity of NNMF weights.")
+parser.add_argument("--log-all", action="store_true", help="Log all available metrics.")
 parser.add_argument("--model-summary-depth", default=-1, type=int)
 parser.add_argument("--tags", default="", type=str, help="Comma separated tags.")
 parser.add_argument("--seed", default=2045, type=int)  # Singularity is near
@@ -271,7 +273,11 @@ args.gpus = torch.cuda.device_count()
 args.num_workers = 4 * args.gpus if args.gpus else 8
 if not args.gpus:
     args.precision = 32
-
+if args.log_all:
+    args.log_gradients = True
+    args.log_weights = True
+    args.log_nnmf_convergence = True
+    args.log_sparsity = True
 
 args.seq_len = args.patch**2 + 1 if args.is_cls_token else args.patch**2
 

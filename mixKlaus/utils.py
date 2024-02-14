@@ -2,7 +2,9 @@ import random
 import string
 from datetime import datetime
 
+import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
 import torchvision
 import torchvision.transforms as transforms
@@ -408,3 +410,30 @@ def anderson(f, x0, m=5, max_iter=50, tol=1e-3, lam=1e-4, beta=1.0):
         if res[-1] < tol:
             break
     return X[:, k % m].view_as(x0), res
+
+def get_sparsity(tensor, dim=None):
+    """
+    Get the sparsity of a tensor in a given dimension based on the Entropy.
+    Sparsity is calculated as one minus the ratio of the actual entropy to the maximum possible entropy.
+    Output is a value between zero and one as: 0 for a tensor where all values are equally likely (i.e., not sparse),
+    and 1 for a tensor where one value dominates (i.e., very sparse).
+    
+    The entropy of a distribution is calculated as:
+    H(X) = -sum(p(x) * log(p(x))) for all x in X
+    
+    The sparsity is then calculated as:
+    S(X) = 1 - H(X) / (-log(1/N))
+
+    Parameters:
+    tensor (torch.Tensor): The input tensor.
+    dim (int, optional): The dimension along which to calculate the sparsity. If None, the sparsity is calculated for the entire tensor.
+
+    Returns:
+    float: The sparsity of the tensor.
+    """
+    # normalize the tensor along the dimension
+    probs = F.normalize(tensor.float(), p=1, dim=dim)
+    entropy = torch.sum(-probs * torch.log2(probs.clamp(min=1e-20)), dim=dim)
+    N = tensor.numel() if dim is None else tensor.shape[dim]
+    sparsity = 1 + (entropy/torch.log2(torch.tensor(1/N))).mean()
+    return sparsity

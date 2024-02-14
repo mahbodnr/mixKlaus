@@ -503,7 +503,7 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
                 f"[Warning] Provided kernel size, stride and padding does not apply a 'same padding' convolution to the input with 'seq_len'."
             )
         self.hidden_seq_len = self.output_size[0] * self.output_size[1]
-        self.global_weight = nn.Parameter(
+        self.global_weight: NonNegativeParameter = NonNegativeParameter(
             torch.rand(self.hidden_features, self.heads, kernel_size, kernel_size)
         )
 
@@ -655,7 +655,12 @@ class NNMFMixerAttentionHeadsDynamicWeights(
         normalize_h=True,
         normalize_h_dim=-1,
     ):
-        super().__init__(
+        NNMFLayerDynamicWeight.__init__(
+            self,
+            n_iterations=n_iterations,
+        )
+        NNMFMixerAttentionHeads.__init__(
+            self,
             seq_len=seq_len,
             features=features,
             embed_dim=embed_dim,
@@ -741,6 +746,10 @@ class NNMFMixerAttentionHeadsConvDynamicWeights(
         normalize_h: bool = True,
         normalize_h_dim: int | None = -1,
     ):
+        NNMFLayerDynamicWeight.__init__(
+            self,
+            n_iterations=n_iterations,
+        )
         NNMFMixerAttentionHeadsConv.__init__(
             self,
             kernel_size=kernel_size,

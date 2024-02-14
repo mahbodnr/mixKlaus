@@ -11,6 +11,7 @@ from mixKlaus.utils import (
     get_experiment_tags,
 )
 from mixKlaus.lr_scheduler import GradualWarmupScheduler, StopScheduler
+from mixKlaus.utils import get_sparsity
 from nnmf.parameters import NonNegativeParameter
 from nnmf import NNMFLayer
 
@@ -247,9 +248,15 @@ class Net(pl.LightningModule):
             if self.hparams.use_wandb:
                 for name, module in self.model.named_modules():
                     if isinstance(module, NNMFLayer):
+                        # h convergance
                         fig = plt.figure()
-                        plt.plot(module.convergence)
-                        wandb.log({f"convergence/{name}": fig})
+                        plt.plot(torch.tensor(module.convergence).detach().cpu().numpy())
+                        wandb.log({f"h_convergence/{name}": fig})
+                        # Reconstruction mse
+                        fig = plt.figure()
+                        plt.plot(torch.tensor(module.convergence).detach().cpu().numpy())
+                        wandb.log({f"reconstruction_mse/{name}": fig})
+
 
         # log learning rate
         for i, param_group in enumerate(self.optimizer.param_groups):
@@ -323,6 +330,19 @@ class Net(pl.LightningModule):
                             name=name,
                             epoch=self.current_epoch,
                             start=min(pos_min, neg_min),
+                        )
+        # log weight sparsity
+        if self.hparams.log_sparsity:
+            for name, param in self.model.named_parameters():
+                if isinstance(param, NonNegativeParameter):
+                    self.log(
+                        name=f"sparsity/{name}",
+                        value= get_sparsity(param, dim= None)
+                    )
+                    for dim in range(param.dim()):
+                        self.log(
+                        name=f"sparsity/{name}_dim{dim}",
+                        value= get_sparsity(param, dim= dim) 
                         )
 
     def on_before_optimizer_step(self, optimizer):
