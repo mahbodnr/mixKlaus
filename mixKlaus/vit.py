@@ -120,6 +120,7 @@ class NNMFMixer(ViT):
         normalize_reconstruction_dim: int | None = None,
         normalize_hidden: bool = True,
         normalize_hidden_dim: int | None = None,
+        h_softmax_power: float = 1.0,
     ):
         super(NNMFMixer, self).__init__(
             in_c,
@@ -164,6 +165,7 @@ class NNMFMixer(ViT):
                     normalize_reconstruction_dim=normalize_reconstruction_dim,
                     normalize_h=normalize_hidden,
                     normalize_h_dim=normalize_hidden_dim,
+                    h_softmax_power=h_softmax_power,
                 )
                 for _ in range(num_layers)
             ]

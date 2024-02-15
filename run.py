@@ -145,6 +145,7 @@ parser.add_argument(
     type=int,
     help="Sequence length for NNMF layers. By default (None), it is set to the same value as seq_len of the layer.",
 )
+parser.add_argument("--h-softmax-power", default=1.0, type=float, help="Power for H-Softmax for sparsity over the `normalize-hidden-dim`. By default (1.0), only applies a normalization.")
 parser.add_argument("--gated", action="store_true")
 parser.add_argument(
     "--mlp-hidden",

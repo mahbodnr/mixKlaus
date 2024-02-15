@@ -1,6 +1,9 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from nnmf import DEBUG
+if DEBUG:
+    import debug.functional as F
 
 class PositiveConv2d(nn.Conv2d):
     def __init__(self, *args, **kwargs):

@@ -1,8 +1,12 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from . import DEBUG
+if DEBUG:
+    import debug.functional as F
 
-from nnmf import NNMFLayer, NonNegativeParameter, NNMFLayerDynamicWeight
+from nnmf.modules import NNMFLayer, NonNegativeParameter, NNMFLayerDynamicWeight
+from nnmf.utils import PowerSoftmax
 
 from mixKlaus.utils import anderson
 
@@ -147,6 +151,7 @@ class NNMFMixerEncoder(TransformerEncoder):
         normalize_reconstruction_dim: int | None = -1,
         normalize_h: bool = True,
         normalize_h_dim: int | None = -1,
+        h_softmax_power: float = 1,
     ):
         super(NNMFMixerEncoder, self).__init__(
             features,
@@ -176,6 +181,7 @@ class NNMFMixerEncoder(TransformerEncoder):
                     hidden_features=hidden_features,
                     backward_method=backward_method,
                     h_update_rate=1,
+                    h_softmax_power=h_softmax_power,
                     keep_h=False,
                     activate_secure_tensors=True,
                     solver=anderson,
@@ -200,6 +206,7 @@ class NNMFMixerEncoder(TransformerEncoder):
                     use_out_proj=use_out_proj,
                     backward_method=backward_method,
                     h_update_rate=1,
+                    h_softmax_power=h_softmax_power,
                     keep_h=False,
                     activate_secure_tensors=True,
                     solver=anderson,
@@ -229,6 +236,7 @@ class NNMFMixerEncoder(TransformerEncoder):
                     output=output,
                     backward_method=backward_method,
                     h_update_rate=1,
+                    h_softmax_power=h_softmax_power,
                     keep_h=False,
                     activate_secure_tensors=True,
                     use_out_proj=use_out_proj,
@@ -253,6 +261,7 @@ class NNMFMixerEncoder(TransformerEncoder):
                     output=output,
                     backward_method=backward_method,
                     h_update_rate=1,
+                    h_softmax_power=h_softmax_power,
                     keep_h=False,
                     activate_secure_tensors=True,
                     use_out_proj=use_out_proj,
@@ -291,6 +300,7 @@ class NNMFMixerAttentionHeads(NNMFLayer):
         use_out_proj: bool = True,
         backward_method: str = "fixed_point",
         h_update_rate: float = 1,
+        h_softmax_power: float = 1,
         keep_h: bool = False,
         activate_secure_tensors: bool = True,
         solver=None,
@@ -330,6 +340,7 @@ class NNMFMixerAttentionHeads(NNMFLayer):
         self.hidden_seq_len: int = seq_len if hidden_seq_len is None else hidden_seq_len
         self.normalize_h = normalize_h
         self.normalize_h_dim = normalize_h_dim
+        self.power_softmax = PowerSoftmax(h_softmax_power, dim=self.normalize_h_dim)
 
         self.embed = nn.Linear(features, embed_dim)
 
@@ -359,8 +370,6 @@ class NNMFMixerAttentionHeads(NNMFLayer):
 
     @torch.no_grad()
     def normalize_weights(self) -> None:
-        assert self.threshold >= 0
-
         for weight in [self.local_weight, self.global_weight]:
             weight_data = F.normalize(
                 weight.data, p=1, dim=1
@@ -397,8 +406,8 @@ class NNMFMixerAttentionHeads(NNMFLayer):
     def _process_h(self, h):
         h = self._secure_tensor(h)
         if self.normalize_h:
-            h = F.normalize(h, p=1, dim=self.normalize_h_dim)
-        # TODO: apply sparsity
+            # if power==1 then it is a simple normalization
+            h = self.power_softmax(h)
         return h
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -440,6 +449,7 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
         use_out_proj: bool = True,
         backward_method: str = "fixed_point",
         h_update_rate: float = 1,
+        h_softmax_power: float = 1,
         keep_h: bool = False,
         activate_secure_tensors: bool = True,
         solver: callable = None,
@@ -475,6 +485,8 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
         self.output: str = output
         self.normalize_h = normalize_h
         self.normalize_h_dim = normalize_h_dim
+        self.power_softmax = PowerSoftmax(h_softmax_power, dim=self.normalize_h_dim)
+
 
         assert self.hidden_features > heads and (
             self.hidden_features % heads == 0
@@ -526,8 +538,6 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
 
     @torch.no_grad()
     def normalize_weights(self) -> None:
-        assert self.threshold >= 0
-
         weight_data = F.normalize(
             self.local_weight.data, p=1, dim=1
         )  # May contain negative values if Madam not used
@@ -617,8 +627,8 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
     def _process_h(self, h):
         h = self._secure_tensor(h)
         if self.normalize_h:
-            h = F.normalize(h, p=1, dim=self.normalize_h_dim)
-        # TODO: apply sparsity
+            # if power==1 then it is a simple normalization
+            h = self.power_softmax(h)
         return h
 
     @staticmethod
@@ -645,6 +655,7 @@ class NNMFMixerAttentionHeadsDynamicWeights(
         use_out_proj: bool = True,
         backward_method: str = "fixed_point",
         h_update_rate: float = 1,
+        h_softmax_power: float = 1,
         keep_h: bool = False,
         activate_secure_tensors: bool = True,
         solver=None,
@@ -673,6 +684,7 @@ class NNMFMixerAttentionHeadsDynamicWeights(
             use_out_proj=use_out_proj,
             backward_method=backward_method,
             h_update_rate=h_update_rate,
+            h_softmax_power=h_update_rate,
             keep_h=keep_h,
             activate_secure_tensors=activate_secure_tensors,
             solver=solver,
@@ -691,8 +703,6 @@ class NNMFMixerAttentionHeadsDynamicWeights(
 
     @torch.no_grad()
     def normalize_weights(self) -> None:
-        assert self.threshold >= 0
-
         weight_data = F.normalize(
             self.local_weight.data, p=1, dim=1
         )  # May contain negative values if Madam not used
@@ -736,6 +746,7 @@ class NNMFMixerAttentionHeadsConvDynamicWeights(
         use_out_proj: bool = True,
         backward_method: str = "fixed_point",
         h_update_rate: float = 1,
+        h_softmax_power: float = 1,
         keep_h: bool = False,
         activate_secure_tensors: bool = True,
         solver: callable = None,
@@ -766,6 +777,7 @@ class NNMFMixerAttentionHeadsConvDynamicWeights(
             use_out_proj=use_out_proj,
             backward_method=backward_method,
             h_update_rate=h_update_rate,
+            h_softmax_power=h_update_rate,
             keep_h=keep_h,
             activate_secure_tensors=activate_secure_tensors,
             solver=solver,
@@ -784,8 +796,6 @@ class NNMFMixerAttentionHeadsConvDynamicWeights(
 
     @torch.no_grad()
     def normalize_weights(self) -> None:
-        assert self.threshold >= 0
-
         weight_data = F.normalize(
             self.local_weight.data, p=1, dim=1
         )  # May contain negative values if Madam not used

@@ -4,6 +4,10 @@ from typing import Union, List
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from nnmf import DEBUG
+if DEBUG:
+    import debug.functional as F
+
 from torch.nn.modules.utils import _pair
 
 from mixKlaus.utils import PowerSoftmax
@@ -115,7 +119,6 @@ class NNMFLayer(nn.Module):
                 reconstruction, p=1, dim=self.normalize_reconstruction_dim, eps=1e-20
             )
         nnmf_update = input / reconstruction
-        assert nnmf_update.isfinite().all() and nnmf_update.isnan().any()==0, (nnmf_update, input, reconstruction, input.isfinite().all(), reconstruction.isfinite().all(), input.isnan().any(), reconstruction.isnan().any(), reconstruction.min(), reconstruction.max())
         new_h = self.h * self._forward(nnmf_update)
         if self.h_update_rate == 1:
             h = new_h

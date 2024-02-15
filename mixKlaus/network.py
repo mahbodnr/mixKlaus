@@ -13,7 +13,7 @@ from mixKlaus.utils import (
 from mixKlaus.lr_scheduler import GradualWarmupScheduler, StopScheduler
 from mixKlaus.utils import get_sparsity
 from nnmf.parameters import NonNegativeParameter
-from nnmf import NNMFLayer
+from nnmf.modules import NNMFLayer
 
 
 class Net(pl.LightningModule):

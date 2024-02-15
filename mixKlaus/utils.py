@@ -5,6 +5,10 @@ from datetime import datetime
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from . import DEBUG
+if DEBUG:
+    import debug.functional as F
+    
 from torch.utils.data import DataLoader
 import torchvision
 import torchvision.transforms as transforms
@@ -111,6 +115,7 @@ def get_model(args):
             normalize_reconstruction_dim=args.normalize_reconstruction_dim,
             normalize_hidden=args.normalize_hidden,
             normalize_hidden_dim=args.normalize_hidden_dim,
+            h_softmax_power=args.h_softmax_power,
         )
     elif args.model_name == "baseline_mixer":
         from mixKlaus.vit import BaselineMixer
