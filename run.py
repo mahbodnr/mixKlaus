@@ -102,7 +102,7 @@ parser.add_argument(
 parser.add_argument("--max-epochs", default=100, type=int)
 parser.add_argument("--dry-run", action="store_true")
 parser.add_argument("--weight-decay", default=5e-5, type=float)
-parser.add_argument("--precision", default="16-mixed", type=str)
+parser.add_argument("--precision", default="32-true", type=str, choices=["16", "32", "64", 'bf16', '16-true', '16-mixed', 'bf16-true', 'bf16-mixed', '32-true', '64-true'])
 parser.add_argument("--autoaugment", action="store_true")
 parser.add_argument(
     "--random-crop-padding",
@@ -222,6 +222,13 @@ parser.add_argument(
     help="How to compute the output of the Transformer ONLY IF the <CLS> token is off.",
 )
 parser.add_argument(
+    "--default-dtype",
+    default="float32",
+    type=str,
+    choices=["float32", "float64"],
+    help="Default dtype for the model.",
+)
+parser.add_argument(
     "--matmul-precision",
     default="medium",
     type=str,
@@ -267,9 +274,17 @@ parser.add_argument("--no-shuffle", action="store_false", dest="shuffle")
 parser.add_argument("--allow-download", action="store_true", dest="download_data")
 args = parser.parse_args()
 
+# torch set default dtype
+if args.default_dtype == "float64":
+    torch.set_default_dtype(torch.float64)
+    torch.set_default_tensor_type(torch.DoubleTensor)
+elif args.default_dtype == "float32":
+    torch.set_default_dtype(torch.float32)
+    torch.set_default_tensor_type(torch.FloatTensor)
+    torch.set_float32_matmul_precision(args.matmul_precision)
+
 torch.manual_seed(args.seed)
 np.random.seed(args.seed)
-torch.set_float32_matmul_precision(args.matmul_precision)
 args.gpus = torch.cuda.device_count()
 args.num_workers = 4 * args.gpus if args.gpus else 8
 if not args.gpus:

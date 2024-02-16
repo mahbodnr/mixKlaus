@@ -1,5 +1,10 @@
 import torch.nn.functional as F
 import torch
+import os
+from datetime import datetime
+
+BASE_PATH = "./debug/logs/"
+RUN_ID = datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + str(torch.randint(0, 100000, (1,)).item())
 
 def debugger_wrapper(func):
     def wrapper(*args, **kwargs):
@@ -12,6 +17,12 @@ def debugger_wrapper(func):
         tensor_args["output"] = output
         errors = check_tensors(tensor_args)
         if errors:
+            # make a folder for the run
+            run_path = BASE_PATH + RUN_ID
+            os.makedirs(run_path, exist_ok=True)
+            # save tensors to file
+            for name, tensor in tensor_args.items():
+                torch.save(tensor, os.path.join(run_path, f"{name}.pt"))
             raise ValueError(
                 f"Error in {func.__name__}:\n"
                 + "\n\n".join(errors)
