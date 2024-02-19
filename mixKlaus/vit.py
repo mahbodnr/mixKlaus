@@ -121,6 +121,7 @@ class NNMFMixer(ViT):
         normalize_hidden: bool = True,
         normalize_hidden_dim: int | None = None,
         h_softmax_power: float = 1.0,
+        convergence_threshold: float = 0.0,
     ):
         super(NNMFMixer, self).__init__(
             in_c,
@@ -166,6 +167,7 @@ class NNMFMixer(ViT):
                     normalize_h=normalize_hidden,
                     normalize_h_dim=normalize_hidden_dim,
                     h_softmax_power=h_softmax_power,
+                    convergence_threshold=convergence_threshold,
                 )
                 for _ in range(num_layers)
             ]

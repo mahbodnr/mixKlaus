@@ -1,3 +1,4 @@
+import time
 import pytorch_lightning as pl
 import torch
 import wandb
@@ -30,7 +31,20 @@ class Net(pl.LightningModule):
         if hparams.mixup:
             self.mixup = MixUp(alpha=1.0)
         self.log_image_flag = hparams._comet_api_key is None
+    
+    def log_time(func):
+        """
+        A decorator to measure the time of a function and log it.
+        """
+        def wrapper(self, *args, **kwargs):
+            start = time.time()
+            result = func(self, *args, **kwargs)
+            end = time.time()
+            self.log(f"{func.__name__}_time", end - start)
+            return result
 
+        return wrapper
+        
     def forward(self, x):
         return self.model(x)
 
@@ -203,6 +217,7 @@ class Net(pl.LightningModule):
             # default tags:
             self.logger.experiment.add_tags(get_experiment_tags(self.hparams))
 
+    @log_time
     def _step(self, img, label):
         if self.hparams.cutmix or self.hparams.mixup:
             if self.hparams.cutmix:
@@ -243,12 +258,12 @@ class Net(pl.LightningModule):
         return loss
 
     def on_train_epoch_end(self):
-        # log NNMF Converganse
+        # log NNMF convergence
         if self.hparams.log_nnmf_convergence:
             if self.hparams.use_wandb:
                 for name, module in self.model.named_modules():
                     if isinstance(module, NNMFLayer):
-                        # h convergance
+                        # h convergence
                         fig = plt.figure()
                         plt.plot(torch.tensor(module.convergence).detach().cpu().numpy())
                         wandb.log({f"h_convergence/{name}": fig})
@@ -388,10 +403,15 @@ class Net(pl.LightningModule):
                     raise e
 
     def on_train_batch_end(self, out, batch, batch_idx):
-        # Renormalize NNMF parameters
-        for module in self.model.modules():
+        for name, module in self.model.named_modules():
+            # Renormalize NNMF parameters
             if hasattr(module, "normalize_weights"):
                 module.normalize_weights()
+            if hasattr(module, "forward_iterations"):
+                self.log(
+                    f"forward_iterations/{name}",
+                    module.forward_iterations,
+                )
 
     def validation_step(self, batch, batch_idx):
         img, label = batch

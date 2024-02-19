@@ -26,6 +26,7 @@ class NNMFLayer(nn.Module):
         keep_h=False,
         activate_secure_tensors=False,
         return_reconstruction=False,
+        convergence_threshold=0,
         solver=None,
         normalize_input=False,
         normalize_input_dim=None,
@@ -54,6 +55,7 @@ class NNMFLayer(nn.Module):
         self.return_reconstruction = return_reconstruction
         self.h_update_rate = h_update_rate
         self.keep_h = keep_h
+        self.convergence_threshold = convergence_threshold
 
         self.backward = backward_method
         if self.backward == "solver":
@@ -77,6 +79,7 @@ class NNMFLayer(nn.Module):
         self.reconstruction = None
         self.convergence = None
         self.reconstruction_mse = None
+        self.forward_iterations = None
 
     def _secure_tensor(self, t):
         return t.clamp_min(SECURE_TENSOR_MIN) if self.activate_secure_tensors else t
@@ -138,7 +141,8 @@ class NNMFLayer(nn.Module):
         self.convergence = []
         self.reconstruction_mse = []
         if self.backward == "all_grads":
-            for _ in range(self.n_iterations):
+            for i in range(self.n_iterations):
+                self.forward_iterations = i
                 new_h, self.reconstruction = self._nnmf_iteration(input)
                 self.convergence.append(
                     F.mse_loss(new_h, self.h)
@@ -147,10 +151,13 @@ class NNMFLayer(nn.Module):
                     F.mse_loss(self.reconstruction, input)
                 )
                 self.h = new_h
+                if self.convergence_threshold > 0 and self.convergence[-1] < self.convergence_threshold:
+                    break
 
         elif self.backward == "fixed_point":
             with torch.no_grad():
                 for _ in range(self.n_iterations):
+                    self.forward_iterations = i
                     new_h, self.reconstruction = self._nnmf_iteration(input)
                     self.convergence.append(
                         torch.norm(new_h - self.h, p=1, dim=1).mean().item()
@@ -159,8 +166,12 @@ class NNMFLayer(nn.Module):
                         F.mse_loss(self.reconstruction - input)
                     )
                     self.h = new_h
+                    if self.convergence_threshold > 0 and self.convergence[-1] < self.convergence_threshold:
+                        break
+
 
             if self.training:
+                self.forward_iterations += 1
                 new_h, self.reconstruction = self._nnmf_iteration(input)
                 self.convergence.append(
                     torch.norm(new_h - self.h, p=1, dim=1).mean().item()
@@ -172,10 +183,20 @@ class NNMFLayer(nn.Module):
 
         elif self.backward == "solver":
             with torch.no_grad():
-                for _ in range(self.n_iterations):
+                for i in range(self.n_iterations):
+                    self.forward_iterations = i
                     self.h, self.reconstruction = self._nnmf_iteration(input)
+                    self.convergence.append(
+                        torch.norm(self.backward_res, p=1, dim=1).mean().item()
+                    )
+                    self.reconstruction_mse.append(
+                        F.mse_loss(self.reconstruction - input)
+                    )
+                    if self.convergence_threshold > 0 and self.convergence[-1] < self.convergence_threshold:
+                        break
 
             if self.training:
+                self.forward_iterations += 1
                 self.h = self.h.requires_grad_()
                 new_h, new_reconstruction = self._nnmf_iteration(input)
 
@@ -236,6 +257,7 @@ class NNMFLayerDynamicWeight(NNMFLayer):
         activate_secure_tensors=False,
         return_reconstruction=False,
         solver=None,
+        convergence_threshold=0,
         normalize_input=False,
         normalize_input_dim=None,
         normalize_reconstruction=False,
@@ -250,6 +272,7 @@ class NNMFLayerDynamicWeight(NNMFLayer):
             activate_secure_tensors=activate_secure_tensors,
             return_reconstruction=return_reconstruction,
             solver=solver,
+            convergence_threshold=convergence_threshold,
             normalize_input=normalize_input,
             normalize_input_dim=normalize_input_dim,
             normalize_reconstruction=normalize_reconstruction,
@@ -274,6 +297,8 @@ class NNMFDense(NNMFLayer):
         out_features,
         n_iterations,
         backward_method="fixed_point",
+        solver=None,
+        convergence_threshold=0,
         h_update_rate=1,
         keep_h=False,
         activate_secure_tensors=False,
@@ -286,6 +311,8 @@ class NNMFDense(NNMFLayer):
             keep_h,
             activate_secure_tensors,
             return_reconstruction,
+            solver=solver,
+            convergence_threshold=convergence_threshold,
             normalize_input=True,
             normalize_input_dim=1,
             normalize_reconstruction=True,
@@ -336,6 +363,8 @@ class NNMFDenseDynamicWeight(NNMFLayerDynamicWeight, NNMFDense):
         out_features,
         n_iterations,
         backward_method="fixed_point",
+        solver=None,
+        convergence_threshold=0,
         h_update_rate=1,
         w_update_rate=1,
         keep_h=False,
@@ -348,6 +377,8 @@ class NNMFDenseDynamicWeight(NNMFLayerDynamicWeight, NNMFDense):
             out_features=out_features,
             n_iterations=n_iterations,
             backward_method=backward_method,
+            solver=solver,
+            convergence_threshold=convergence_threshold,
             h_update_rate=h_update_rate,
             keep_h=keep_h,
             activate_secure_tensors=activate_secure_tensors,
@@ -377,6 +408,8 @@ class NNMFConv2d(NNMFLayer):
         dilation=1,
         normalize_channels=False,
         backward_method="fixed_point",
+        solver=None,
+        convergence_threshold=0,
         h_update_rate=1,
         keep_h=False,
         activate_secure_tensors=False,
@@ -389,6 +422,8 @@ class NNMFConv2d(NNMFLayer):
             keep_h,
             activate_secure_tensors,
             return_reconstruction,
+            solver=solver,
+            convergence_threshold=convergence_threshold,
             normalize_input=True,
             normalize_input_dim=(1, 2, 3),
             normalize_reconstruction=True,
@@ -511,6 +546,8 @@ class NNMFConvTransposed2d(NNMFConv2d):
         dilation=1,
         normalize_channels=False,
         backward_method="fixed_point",
+        solver=None,
+        convergence_threshold=0,
         h_update_rate=1,
         keep_h=False,
         activate_secure_tensors=False,
@@ -526,6 +563,8 @@ class NNMFConvTransposed2d(NNMFConv2d):
             dilation,
             normalize_channels,
             backward_method,
+            solver,
+            convergence_threshold,
             h_update_rate,
             keep_h,
             activate_secure_tensors,
@@ -638,6 +677,8 @@ class FPNNMFDenseDynamicWeight(FPNNMFLayerDynamicWeight, NNMFDenseDynamicWeight)
         out_features,
         n_iterations,
         backward_method="fixed_point",
+        solver=None,
+        convergence_threshold=0,
         h_update_rate=1,
         w_update_rate=1,
         keep_h=False,
@@ -650,6 +691,8 @@ class FPNNMFDenseDynamicWeight(FPNNMFLayerDynamicWeight, NNMFDenseDynamicWeight)
             out_features=out_features,
             n_iterations=n_iterations,
             backward_method=backward_method,
+            solver=solver,
+            convergence_threshold=convergence_threshold,
             h_update_rate=h_update_rate,
             w_update_rate=w_update_rate,
             keep_h=keep_h,

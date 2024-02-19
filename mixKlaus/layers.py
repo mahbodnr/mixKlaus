@@ -132,6 +132,7 @@ class NNMFMixerEncoder(TransformerEncoder):
         mlp_hidden: int,
         output: str,
         backward_method: str,
+        convergence_threshold: float = 0,
         hidden_features: int | None = None,
         hidden_seq_len: int | None = None,
         gated: bool = False,
@@ -185,6 +186,7 @@ class NNMFMixerEncoder(TransformerEncoder):
                     keep_h=False,
                     activate_secure_tensors=True,
                     solver=anderson,
+                    convergence_threshold=convergence_threshold,
                     normalize_input=normalize_input,
                     normalize_input_dim=normalize_input_dim,
                     normalize_reconstruction=normalize_reconstruction,
@@ -210,6 +212,7 @@ class NNMFMixerEncoder(TransformerEncoder):
                     keep_h=False,
                     activate_secure_tensors=True,
                     solver=anderson,
+                    convergence_threshold=convergence_threshold,
                     normalize_input=normalize_input,
                     normalize_input_dim=normalize_input_dim,
                     normalize_reconstruction=normalize_reconstruction,
@@ -241,6 +244,7 @@ class NNMFMixerEncoder(TransformerEncoder):
                     activate_secure_tensors=True,
                     use_out_proj=use_out_proj,
                     solver=anderson,
+                    convergence_threshold=convergence_threshold,
                     normalize_input=normalize_input,
                     normalize_input_dim=normalize_input_dim,
                     normalize_reconstruction=normalize_reconstruction,
@@ -267,6 +271,7 @@ class NNMFMixerEncoder(TransformerEncoder):
                     use_out_proj=use_out_proj,
                     solver=anderson,
                     normalize_input=normalize_input,
+                    convergence_threshold=convergence_threshold,
                     normalize_input_dim=normalize_input_dim,
                     normalize_reconstruction=normalize_reconstruction,
                     normalize_reconstruction_dim=normalize_reconstruction_dim,
@@ -304,6 +309,7 @@ class NNMFMixerAttentionHeads(NNMFLayer):
         keep_h: bool = False,
         activate_secure_tensors: bool = True,
         solver=None,
+        convergence_threshold=0,
         normalize_input=True,
         normalize_input_dim=-1,
         normalize_reconstruction=True,
@@ -318,6 +324,7 @@ class NNMFMixerAttentionHeads(NNMFLayer):
             keep_h=keep_h,
             activate_secure_tensors=activate_secure_tensors,
             solver=solver,
+            convergence_threshold=convergence_threshold,
             normalize_input=normalize_input,
             normalize_input_dim=normalize_input_dim,
             normalize_reconstruction=normalize_reconstruction,
@@ -453,6 +460,7 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
         keep_h: bool = False,
         activate_secure_tensors: bool = True,
         solver: callable = None,
+        convergence_threshold: float = 0,
         normalize_input: bool = True,
         normalize_input_dim: int | None = -1,
         normalize_reconstruction: bool = True,
@@ -467,6 +475,7 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
             keep_h=keep_h,
             activate_secure_tensors=activate_secure_tensors,
             solver=solver,
+            convergence_threshold=convergence_threshold,
             normalize_input=normalize_input,
             normalize_input_dim=normalize_input_dim,
             normalize_reconstruction=normalize_reconstruction,
@@ -488,7 +497,7 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
         self.power_softmax = PowerSoftmax(h_softmax_power, dim=self.normalize_h_dim)
 
 
-        assert self.hidden_features > heads and (
+        assert self.hidden_features >= heads and (
             self.hidden_features % heads == 0
         ), f"Incompatible hidden features: {self.hidden_features}, having heads: {heads}"
         self.embed = nn.Linear(features, embed_dim)
@@ -659,6 +668,7 @@ class NNMFMixerAttentionHeadsDynamicWeights(
         keep_h: bool = False,
         activate_secure_tensors: bool = True,
         solver=None,
+        convergence_threshold=0,
         normalize_input=True,
         normalize_input_dim=-1,
         normalize_reconstruction=True,
@@ -688,6 +698,7 @@ class NNMFMixerAttentionHeadsDynamicWeights(
             keep_h=keep_h,
             activate_secure_tensors=activate_secure_tensors,
             solver=solver,
+            convergence_threshold=convergence_threshold,
             normalize_input=normalize_input,
             normalize_input_dim=normalize_input_dim,
             normalize_reconstruction=normalize_reconstruction,
@@ -750,6 +761,7 @@ class NNMFMixerAttentionHeadsConvDynamicWeights(
         keep_h: bool = False,
         activate_secure_tensors: bool = True,
         solver: callable = None,
+        convergence_threshold: float = 0,
         normalize_input: bool = True,
         normalize_input_dim: int | None = -1,
         normalize_reconstruction: bool = True,
@@ -781,6 +793,7 @@ class NNMFMixerAttentionHeadsConvDynamicWeights(
             keep_h=keep_h,
             activate_secure_tensors=activate_secure_tensors,
             solver=solver,
+            convergence_threshold=convergence_threshold,
             normalize_input=normalize_input,
             normalize_input_dim=normalize_input_dim,
             normalize_reconstruction=normalize_reconstruction,

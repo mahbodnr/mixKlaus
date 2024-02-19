@@ -116,6 +116,7 @@ def get_model(args):
             normalize_hidden=args.normalize_hidden,
             normalize_hidden_dim=args.normalize_hidden_dim,
             h_softmax_power=args.h_softmax_power,
+            convergence_threshold=args.convergence_threshold,
         )
     elif args.model_name == "baseline_mixer":
         from mixKlaus.vit import BaselineMixer

@@ -122,6 +122,11 @@ parser.add_argument(
     type=int,
     help="Number of iterations in Matrix Decomposition (MD).",
 )
+parser.add_argument("--convergence-threshold", 
+    default=0, 
+    type=float, 
+    help="If set to a value greater than 0, nnmf iterations will stop when the convergence rate for h (MSE with the last iteration) is below this threshold. By default (0), it is not applied."
+)
 parser.add_argument(
     "--router-iter",
     default=3,
@@ -145,7 +150,7 @@ parser.add_argument(
     type=int,
     help="Sequence length for NNMF layers. By default (None), it is set to the same value as seq_len of the layer.",
 )
-parser.add_argument("--h-softmax-power", default=1.0, type=float, help="Power for H-Softmax for sparsity over the `normalize-hidden-dim`. By default (1.0), only applies a normalization.")
+parser.add_argument("--h-softmax-power", default=1.0, type=float, help="Power for H-Softmax for sparsity over the `normalize-hidden-dim`. By default (1.0), only applies a normalization. ONLY APPLIES IF `normalize-hidden` IS ON.")
 parser.add_argument("--gated", action="store_true")
 parser.add_argument(
     "--mlp-hidden",
