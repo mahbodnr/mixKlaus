@@ -175,6 +175,33 @@ class NNMFMixer(ViT):
         self.output_mode = output_mode
         if output_mode == "fc":
             self.out_fc = nn.Linear(hidden * self.seq_len, hidden)
+        elif output_mode == "mixer":
+            self.out_mixer = NNMFMixerEncoder(
+                n_iterations=nnmf_iterations,
+                features=hidden,
+                embed_dim=embed_dim,
+                seq_len=self.seq_len,
+                hidden_features=nnmf_hidden,
+                hidden_seq_len=1,
+                mlp_hidden=mlp_hidden,
+                head=head,
+                gated=gated,
+                skip_connection=False,
+                dropout=dropout,
+                use_mlp=encoder_mlp,
+                output="hidden",
+                backward_method=nnmf_backward,
+                conv=False,
+                dynamic_weight=dynamic_weight,
+                normalize_input=normalize_input,
+                normalize_input_dim=normalize_input_dim,
+                normalize_reconstruction=normalize_reconstruction,
+                normalize_reconstruction_dim=normalize_reconstruction_dim,
+                normalize_h=normalize_hidden,
+                normalize_h_dim=normalize_hidden_dim,
+                h_softmax_power=h_softmax_power,
+                convergence_threshold=convergence_threshold,
+            )
 
     def forward(self, x):
         out = self._to_words(x)
@@ -190,6 +217,8 @@ class NNMFMixer(ViT):
                 out = out.mean(1)
             elif self.output_mode == "fc":
                 out = self.out_fc(out.flatten(1))
+            elif self.output_mode == "mixer":
+                out = self.out_mixer(out).squeeze(1)
             else:
                 raise NotImplementedError
         out = self.fc(out)

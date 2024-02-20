@@ -223,7 +223,7 @@ parser.add_argument(
     "--output-mode",
     default="mean",
     type=str,
-    choices=["mean", "fc"],
+    choices=["mean", "fc", "mixer"],
     help="How to compute the output of the Transformer ONLY IF the <CLS> token is off.",
 )
 parser.add_argument(

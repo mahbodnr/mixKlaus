@@ -45,6 +45,7 @@ class Net(pl.LightningModule):
 
         return wrapper
         
+    @log_time
     def forward(self, x):
         return self.model(x)
 
@@ -217,7 +218,6 @@ class Net(pl.LightningModule):
             # default tags:
             self.logger.experiment.add_tags(get_experiment_tags(self.hparams))
 
-    @log_time
     def _step(self, img, label):
         if self.hparams.cutmix or self.hparams.mixup:
             if self.hparams.cutmix:
@@ -360,6 +360,9 @@ class Net(pl.LightningModule):
                         value= get_sparsity(param, dim= dim) 
                         )
 
+    # def backward(self, loss):
+    #     loss.backward(retain_graph=True)
+
     def on_before_optimizer_step(self, optimizer):
         # log gradients once per epoch #TODO: add for wandb
         if (
@@ -408,10 +411,11 @@ class Net(pl.LightningModule):
             if hasattr(module, "normalize_weights"):
                 module.normalize_weights()
             if hasattr(module, "forward_iterations"):
-                self.log(
-                    f"forward_iterations/{name}",
-                    module.forward_iterations,
-                )
+                if module.convergence_threshold > 0:
+                    self.log(
+                        f"forward_iterations/{name}",
+                        module.forward_iterations,
+                    )
 
     def validation_step(self, batch, batch_idx):
         img, label = batch

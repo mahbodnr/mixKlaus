@@ -156,14 +156,14 @@ class NNMFLayer(nn.Module):
 
         elif self.backward == "fixed_point":
             with torch.no_grad():
-                for _ in range(self.n_iterations):
+                for i in range(self.n_iterations):
                     self.forward_iterations = i
                     new_h, self.reconstruction = self._nnmf_iteration(input)
                     self.convergence.append(
-                        torch.norm(new_h - self.h, p=1, dim=1).mean().item()
+                        F.mse_loss(new_h, self.h)
                     )
                     self.reconstruction_mse.append(
-                        F.mse_loss(self.reconstruction - input)
+                        F.mse_loss(self.reconstruction, input)
                     )
                     self.h = new_h
                     if self.convergence_threshold > 0 and self.convergence[-1] < self.convergence_threshold:
@@ -174,10 +174,10 @@ class NNMFLayer(nn.Module):
                 self.forward_iterations += 1
                 new_h, self.reconstruction = self._nnmf_iteration(input)
                 self.convergence.append(
-                    torch.norm(new_h - self.h, p=1, dim=1).mean().item()
+                    F.mse_loss(new_h, self.h)
                 )
                 self.reconstruction_mse.append(
-                    F.mse_loss(self.reconstruction - input)
+                    F.mse_loss(self.reconstruction, input)
                 )
                 self.h = new_h
 
@@ -185,13 +185,14 @@ class NNMFLayer(nn.Module):
             with torch.no_grad():
                 for i in range(self.n_iterations):
                     self.forward_iterations = i
-                    self.h, self.reconstruction = self._nnmf_iteration(input)
+                    new_h, self.reconstruction = self._nnmf_iteration(input)
                     self.convergence.append(
-                        torch.norm(self.backward_res, p=1, dim=1).mean().item()
+                        F.mse_loss(new_h, self.h)
                     )
                     self.reconstruction_mse.append(
-                        F.mse_loss(self.reconstruction - input)
+                        F.mse_loss(self.reconstruction, input)
                     )
+                    self.h = new_h
                     if self.convergence_threshold > 0 and self.convergence[-1] < self.convergence_threshold:
                         break
 
@@ -232,7 +233,7 @@ class NNMFLayer(nn.Module):
                         backward_hook_reconstruction
                     )
 
-                self.hook_h = new_h.register_hook(backward_hook)
+                self.hook_h = new_h.register_hook(backward_hook_h)
                 self.h = new_h
                 self.reconstruction = new_reconstruction
         else:

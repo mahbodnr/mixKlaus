@@ -380,7 +380,7 @@ def anderson(f, x0, m=5, max_iter=50, tol=1e-3, lam=1e-4, beta=1.0):
         device=x0.device,
     )
     F = torch.zeros_like(X)
-    X[:, 0], F[:, 0] = x0.view(bsz, -1), f(x0).view(bsz, -1)
+    X[:, 0], F[:, 0] = x0.reshape(bsz, -1), f(x0).reshape(bsz, -1)
     X[:, 1], F[:, 1] = F[:, 0], f(F[:, 0].view_as(x0)).view(bsz, -1)
 
     H = torch.zeros(bsz, m + 1, m + 1, dtype=x0.dtype, device=x0.device)
