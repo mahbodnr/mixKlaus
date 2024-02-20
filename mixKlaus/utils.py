@@ -111,6 +111,7 @@ def get_model(args):
             pos_emb=args.pos_emb,
             output_mode=args.output_mode,
             normalize_input=args.normalize_input,
+            divide_input=args.divide_input,
             normalize_input_dim=args.normalize_input_dim,
             normalize_reconstruction=args.normalize_reconstruction,
             normalize_reconstruction_dim=args.normalize_reconstruction_dim,

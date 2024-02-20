@@ -149,6 +149,7 @@ class NNMFMixerEncoder(TransformerEncoder):
         stride: int | None = None,
         padding: int | None = None,
         normalize_input: bool = True,
+        divide_input: bool = False,
         normalize_input_dim: int | None = -1,
         normalize_reconstruction: bool = True,
         normalize_reconstruction_dim: int | None = -1,
@@ -273,8 +274,9 @@ class NNMFMixerEncoder(TransformerEncoder):
                     activate_secure_tensors=True,
                     use_out_proj=use_out_proj,
                     solver=anderson,
-                    normalize_input=normalize_input,
                     convergence_threshold=convergence_threshold,
+                    normalize_input=normalize_input,
+                    divide_input=divide_input,
                     normalize_input_dim=normalize_input_dim,
                     normalize_reconstruction=normalize_reconstruction,
                     normalize_reconstruction_dim=normalize_reconstruction_dim,
@@ -315,6 +317,7 @@ class NNMFMixerAttentionHeads(NNMFLayer):
         solver=None,
         convergence_threshold=0,
         normalize_input=True,
+        divide_input=False,
         normalize_input_dim=-1,
         normalize_reconstruction=True,
         normalize_reconstruction_dim=-1,
@@ -349,6 +352,7 @@ class NNMFMixerAttentionHeads(NNMFLayer):
             self.hidden_features % heads == 0
         ), f"Incompatible hidden features: {self.hidden_features}, having heads: {heads}"
         self.hidden_seq_len: int = seq_len if hidden_seq_len is None else hidden_seq_len
+        self.divide_input = divide_input
         self.normalize_h = normalize_h
         self.normalize_h_dim = normalize_h_dim
         self.power_softmax = PowerSoftmax(h_softmax_power, dim=self.normalize_h_dim)
@@ -422,6 +426,13 @@ class NNMFMixerAttentionHeads(NNMFLayer):
             h = self.power_softmax(h)
         return h
 
+    def _prepare_input(self, input):
+        if self.normalize_input:
+            input = F.normalize(input, p=1, dim=self.normalize_input_dim, eps=1e-20)
+        if self.divide_input:
+            input = input / input.shape[1]
+        return input
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self.gated:
             z = self.gate_activation(self.gate(x))
@@ -445,6 +456,7 @@ class NNMFMixerAttentionHeads(NNMFLayer):
         assert (self.global_weight >= 0).all(), self.global_weight.min()
         assert (input >= 0).all(), input.min()
 
+    # @torch.no_grad()
     def alpha_dynamics(self, h, input):
         input = F.normalize(input, p=1, dim=(-1,-2))/input.shape[1]
         alpha = F.normalize(

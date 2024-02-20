@@ -129,11 +129,15 @@ class NNMFLayer(nn.Module):
             h = self.h_update_rate * new_h + (1 - self.h_update_rate) * self.h
         return self._process_h(h), self._process_reconstruction(reconstruction)
 
+    def _prepare_input(self, input):
+        if self.normalize_input:
+            input = F.normalize(input, p=1, dim=self.normalize_input_dim, eps=1e-20)
+        return input
+
     def forward(self, input):
         self.normalize_weights()
         self._check_forward(input)
-        if self.normalize_input:
-            input = F.normalize(input, p=1, dim=self.normalize_input_dim, eps=1e-20)
+        input= self._prepare_input(input)
 
         if (not self.keep_h) or (self.h is None):
             self._reset_h(input)

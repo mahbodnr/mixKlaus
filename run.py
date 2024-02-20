@@ -189,6 +189,7 @@ parser.add_argument(
 parser.add_argument(
     "--normalize-input-off", action="store_false", dest="normalize_input"
 )
+parser.add_argument("--divide-input", action="store_true", help="Divide the input by the sequence length.")
 parser.add_argument("--normalize-input-dim", default=-1, nargs="+", type=int)
 parser.add_argument(
     "--normalize-reconstruction-off",
