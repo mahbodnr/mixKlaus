@@ -476,7 +476,7 @@ class NNMFMixerAttentionHeads(NNMFLayer):
         return alpha.unsqueeze(-1).unsqueeze(-1) * h
 
 
-class NNMFMixerAttentionHeadsConv(NNMFLayer):
+class NNMFMixerAttentionHeadsConv(NNMFMixerAttentionHeads):
     def __init__(
         self,
         kernel_size: int,
@@ -496,9 +496,11 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
         h_softmax_power: float = 1,
         keep_h: bool = False,
         activate_secure_tensors: bool = True,
+        alpha_dynamics_iterations: int = 0,
         solver: callable = None,
         convergence_threshold: float = 0,
         normalize_input: bool = True,
+        divide_input: bool = False,
         normalize_input_dim: int | None = -1,
         normalize_reconstruction: bool = True,
         normalize_reconstruction_dim: int | None = -1,
@@ -506,38 +508,31 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
         normalize_h_dim: int | None = -1,
     ) -> None:
         super().__init__(
+            seq_len=seq_len,
+            features=features,
+            embed_dim=embed_dim,
+            heads=heads,
             n_iterations=n_iterations,
+            output=output,
+            hidden_features=hidden_features,
+            gated=gated,
+            use_out_proj=use_out_proj,
             backward_method=backward_method,
             h_update_rate=h_update_rate,
+            h_softmax_power=h_softmax_power,
             keep_h=keep_h,
             activate_secure_tensors=activate_secure_tensors,
+            alpha_dynamics_iterations=alpha_dynamics_iterations,
             solver=solver,
             convergence_threshold=convergence_threshold,
             normalize_input=normalize_input,
+            divide_input=divide_input,
             normalize_input_dim=normalize_input_dim,
             normalize_reconstruction=normalize_reconstruction,
             normalize_reconstruction_dim=normalize_reconstruction_dim,
-            return_reconstruction=True,
+            normalize_h=normalize_h,
+            normalize_h_dim=normalize_h_dim,
         )
-        self.threshold: float = 0.00001
-        self.heads: int = heads
-        self.features: int = features
-        self.seq_len: int = seq_len
-        self.embed_dim: int = embed_dim
-        self.hidden_features: int = (
-            embed_dim if hidden_features is None else hidden_features
-        )
-        assert output in ["reconstruction", "hidden"]
-        self.output: str = output
-        self.normalize_h = normalize_h
-        self.normalize_h_dim = normalize_h_dim
-        self.power_softmax = PowerSoftmax(h_softmax_power, dim=self.normalize_h_dim)
-
-        assert self.hidden_features >= heads and (
-            self.hidden_features % heads == 0
-        ), f"Incompatible hidden features: {self.hidden_features}, having heads: {heads}"
-        self.embed = nn.Linear(features, embed_dim)
-
         self.local_weight: NonNegativeParameter = NonNegativeParameter(
             torch.rand(self.hidden_features // heads, embed_dim // heads)
         )
@@ -564,16 +559,6 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
             torch.rand(self.hidden_features, self.heads, kernel_size, kernel_size)
         )
 
-        self.gated = gated
-        if self.gated:
-            self.gate = nn.Linear(features, embed_dim)
-            self.gate_activation = nn.SiLU()
-
-        self.use_out_proj = use_out_proj
-        if self.use_out_proj:
-            self.out_project = nn.Linear(embed_dim, features)
-
-        self.save_attn_map = False
         self.reset_parameters()
 
     def reset_parameters(self) -> None:
@@ -635,21 +620,8 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
         return x.reshape(x.shape[0], x.shape[1], self.heads, -1)  # B, T, H, D
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if self.gated:
-            z = self.gate_activation(self.gate(x))
-        x = self.embed(x)
         self.global_weight_conv = self._make_global_weight()
-        x = torch.clamp(x, min=MINIMUM_POSITIVE)
-        x = x.reshape(x.shape[0], x.shape[1], self.heads, -1)  # B, T, H, D
-        out = {}
-        out["hidden"], out["reconstruction"] = super().forward(x)
-        x = out[self.output]
-        x = x.flatten(-2)
-        if self.gated:
-            x = x * z
-        if self.use_out_proj:
-            x = self.out_project(x)
-        return x
+        return super().forward(x)
 
     def _reset_h(self, x):
         self.h = torch.rand(
@@ -668,13 +640,6 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
         assert (self.global_weight >= 0).all(), self.global_weight.min()
         assert (input >= 0).all(), input.min()
         assert (self.local_weight >= 0).all(), self.local_weight.min()
-
-    def _process_h(self, h):
-        h = self._secure_tensor(h)
-        if self.normalize_h:
-            # if power==1 then it is a simple normalization
-            h = self.power_softmax(h)
-        return h
 
     @staticmethod
     def get_output_size(Hin, Win, kernel_size, stride, padding):
