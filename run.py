@@ -122,6 +122,12 @@ parser.add_argument(
     type=int,
     help="Number of iterations in Matrix Decomposition (MD).",
 )
+parser.add_argument(
+    "--alpha-iter",
+    default=0,
+    type=int,
+    help="Number of iterations in Alpha Dynamics.",
+)
 parser.add_argument("--convergence-threshold", 
     default=0, 
     type=float, 

@@ -91,6 +91,7 @@ def get_model(args):
             nnmf_iterations=args.md_iter,
             nnmf_output=args.nnmf_output,
             nnmf_backward=args.nnmf_backward,
+            alpha_dynamics_iterations=args.alpha_iter,
             in_c=args.in_c,
             num_classes=args.num_classes,
             img_size=args.size,

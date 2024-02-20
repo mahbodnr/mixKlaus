@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from . import DEBUG
+
 if DEBUG:
     import debug.functional as F
 
@@ -142,6 +143,7 @@ class NNMFMixerEncoder(TransformerEncoder):
         use_mlp: bool = True,
         use_out_proj: bool = True,
         conv: bool = False,
+        alpha_dynamics_iterations: int = 0,
         dynamic_weight: bool = False,
         kernel_size: int | None = None,
         stride: int | None = None,
@@ -261,6 +263,7 @@ class NNMFMixerEncoder(TransformerEncoder):
                     hidden_seq_len=hidden_seq_len,
                     heads=head,
                     n_iterations=n_iterations,
+                    alpha_dynamics_iterations=alpha_dynamics_iterations,
                     gated=gated,
                     output=output,
                     backward_method=backward_method,
@@ -308,6 +311,7 @@ class NNMFMixerAttentionHeads(NNMFLayer):
         h_softmax_power: float = 1,
         keep_h: bool = False,
         activate_secure_tensors: bool = True,
+        alpha_dynamics_iterations: int = 0,
         solver=None,
         convergence_threshold=0,
         normalize_input=True,
@@ -348,6 +352,7 @@ class NNMFMixerAttentionHeads(NNMFLayer):
         self.normalize_h = normalize_h
         self.normalize_h_dim = normalize_h_dim
         self.power_softmax = PowerSoftmax(h_softmax_power, dim=self.normalize_h_dim)
+        self.alpha_dynamics_iterations = alpha_dynamics_iterations
 
         self.embed = nn.Linear(features, embed_dim)
 
@@ -425,6 +430,8 @@ class NNMFMixerAttentionHeads(NNMFLayer):
         x = x.reshape(x.shape[0], x.shape[1], self.heads, -1)  # B, T, H, D
         out = {}
         out["hidden"], out["reconstruction"] = super().forward(x)
+        if self.alpha_dynamics_iterations > 0:
+            out["hidden"] = self.alpha_dynamics(out["hidden"], x)
         x = out[self.output]
         x = x.flatten(-2)
         if self.gated:
@@ -437,6 +444,24 @@ class NNMFMixerAttentionHeads(NNMFLayer):
         assert (self.local_weight >= 0).all(), self.local_weight.min()
         assert (self.global_weight >= 0).all(), self.global_weight.min()
         assert (input >= 0).all(), input.min()
+
+    def alpha_dynamics(self, h, input):
+        input = F.normalize(input, p=1, dim=(-1,-2))/input.shape[1]
+        alpha = F.normalize(
+            torch.ones(h.shape[0], self.hidden_seq_len).to(h.device),
+            p=1,
+            dim=1,
+        )
+        h = F.normalize(h, p=1, dim=(-1, -2))
+        h_reconstruction = torch.einsum("bohf,oi->boihf", h, self.global_weight)
+        h_reconstruction = F.linear(h_reconstruction, self.local_weight.t())
+        for _ in range(self.alpha_dynamics_iterations):
+            alpha_reconstruction = self._reconstruct(
+                h * alpha.unsqueeze(-1).unsqueeze(-1)
+            )
+            alpha = alpha * (h_reconstruction * (input / alpha_reconstruction).unsqueeze(1)).sum((-1, -2, -3))
+
+        return alpha.unsqueeze(-1).unsqueeze(-1) * h
 
 
 class NNMFMixerAttentionHeadsConv(NNMFLayer):
@@ -495,7 +520,6 @@ class NNMFMixerAttentionHeadsConv(NNMFLayer):
         self.normalize_h = normalize_h
         self.normalize_h_dim = normalize_h_dim
         self.power_softmax = PowerSoftmax(h_softmax_power, dim=self.normalize_h_dim)
-
 
         assert self.hidden_features >= heads and (
             self.hidden_features % heads == 0
@@ -846,7 +870,10 @@ class NNMFMixerAttentionHeadsConvDynamicWeights(
         h /= h.shape[1]
 
         new_weight = F.conv2d(
-            h, nnmf_update, stride=self.stride, padding=self.padding, 
+            h,
+            nnmf_update,
+            stride=self.stride,
+            padding=self.padding,
         )
 
         # TODO: update w rate TODO: fix weights in each head
