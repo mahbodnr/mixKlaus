@@ -271,6 +271,13 @@ class Net(pl.LightningModule):
                         fig = plt.figure()
                         plt.plot(torch.tensor(module.convergence).detach().cpu().numpy())
                         wandb.log({f"reconstruction_mse/{name}": fig})
+                        # alpha convergence
+                        if self.hparams.alpha_iter > 0:
+                            fig = plt.figure()
+                            plt.plot(
+                                torch.tensor(module.alpha_convergence).detach().cpu().numpy()
+                            )
+                            wandb.log({f"alpha_convergence/{name}": fig})
 
 
         # log learning rate

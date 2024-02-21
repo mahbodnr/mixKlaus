@@ -469,11 +469,14 @@ class NNMFMixerAttentionHeads(NNMFLayer):
         h = F.normalize(h, p=1, dim=(-1, -2))
         h_reconstruction = torch.einsum("bohf,oi->boihf", h, self.global_weight)
         h_reconstruction = F.linear(h_reconstruction, self.local_weight.t())
+        self.alpha_convergence = []
         for _ in range(self.alpha_dynamics_iterations):
             alpha_reconstruction = self._reconstruct(
                 h * alpha.unsqueeze(-1).unsqueeze(-1)
             )
-            alpha = alpha * (h_reconstruction * (input / alpha_reconstruction).unsqueeze(1)).sum((-1, -2, -3))
+            new_alpha = alpha * (h_reconstruction * (input / alpha_reconstruction).unsqueeze(1)).sum((-1, -2, -3))
+            self.alpha_convergence.append(F.mse_loss(alpha, new_alpha))
+            alpha = new_alpha
 
         return alpha.unsqueeze(-1).unsqueeze(-1) * h
 
@@ -642,6 +645,9 @@ class NNMFMixerAttentionHeadsConv(NNMFMixerAttentionHeads):
         assert (self.global_weight >= 0).all(), self.global_weight.min()
         assert (input >= 0).all(), input.min()
         assert (self.local_weight >= 0).all(), self.local_weight.min()
+
+    def alpha_dynamics(self, h, input):
+        raise NotImplementedError("Alpha dynamics is not implemented for conv layers.")
 
     @staticmethod
     def get_output_size(Hin, Win, kernel_size, stride, padding):
