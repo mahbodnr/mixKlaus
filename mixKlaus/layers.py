@@ -1,3 +1,5 @@
+from copy import deepcopy
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -563,8 +565,43 @@ class NNMFMixerAttentionHeadsConv(NNMFMixerAttentionHeads):
         self.global_weight: NonNegativeParameter = NonNegativeParameter(
             torch.rand(self.hidden_features, self.heads, kernel_size, kernel_size)
         )
-
+        rec_contributer_factor, forw_contributer_factor = self.get_contributer_factors()
+        self.register_buffer(
+            "rec_contributer_factor",
+            rec_contributer_factor,
+        )
+        self.register_buffer(
+            "forw_contributer_factor",
+            forw_contributer_factor,
+        )
         self.reset_parameters()
+
+    @torch.no_grad()
+    def get_contributer_factors(self):
+        temp_model = deepcopy(self)
+        temp_model.local_weight.data = torch.ones_like(temp_model.local_weight)
+        temp_model.global_weight.data = torch.ones_like(temp_model.global_weight)
+        temp_model.normalize_weights()
+        temp_model.global_weight_conv = temp_model._make_global_weight()
+        temp_model.rec_contributer_factor, temp_model.forw_contributer_factor = 1, 1
+        h = torch.ones(
+            (
+                1,
+                self.hidden_seq_len,
+                self.heads,
+                self.hidden_features // self.heads,
+            )
+        )
+        if self.normalize_h:
+           h = F.normalize(h, p=1, dim=self.normalize_h_dim)
+        rec = temp_model._reconstruct(h)
+        rec = rec[0].sum((-1,-2), keepdim=True)
+        rec_contributer_factor = 1/(rec / rec.max())
+        forw = temp_model._forward(h)
+        forw = forw[0].sum((-1,-2), keepdim=True)
+        forw_contributer_factor = 1/(forw / forw.max())
+
+        return rec_contributer_factor, forw_contributer_factor
 
     def reset_parameters(self) -> None:
         torch.nn.init.uniform_(self.local_weight, a=0, b=1)
@@ -610,7 +647,7 @@ class NNMFMixerAttentionHeadsConv(NNMFMixerAttentionHeads):
         )  # B, HD, P, P
         h = h.flatten(-2).permute(0, 2, 1)  # B, T, HD
         h = h.reshape(h.shape[0], h.shape[1], self.heads, -1)  # B, T, H, D
-        return F.linear(h, self.local_weight.t())  # B, T, H, D
+        return F.linear(h, self.local_weight.t()) * self.rec_contributer_factor # B, T, H, D
 
     def _forward(self, x: torch.Tensor) -> torch.Tensor:
         # x: B, T, H, D
@@ -622,7 +659,7 @@ class NNMFMixerAttentionHeadsConv(NNMFMixerAttentionHeads):
             x, self.global_weight_conv, stride=self.stride, padding=self.padding
         )  # B, HD, P, P
         x = x.flatten(-2).permute(0, 2, 1)  # B, T, HD
-        return x.reshape(x.shape[0], x.shape[1], self.heads, -1)  # B, T, H, D
+        return x.reshape(x.shape[0], x.shape[1], self.heads, -1) * self.forw_contributer_factor # B, T, H, D
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         self.global_weight_conv = self._make_global_weight()
