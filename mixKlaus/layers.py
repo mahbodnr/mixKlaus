@@ -582,6 +582,7 @@ class NNMFMixerAttentionHeadsConv(NNMFMixerAttentionHeads):
         temp_model.local_weight.data = torch.ones_like(temp_model.local_weight)
         temp_model.global_weight.data = torch.ones_like(temp_model.global_weight)
         temp_model.normalize_weights()
+        temp_model.input_device = torch.device("cpu")
         temp_model.global_weight_conv = temp_model._make_global_weight()
         temp_model.rec_contributer_factor, temp_model.forw_contributer_factor = 1, 1
         h = torch.ones(

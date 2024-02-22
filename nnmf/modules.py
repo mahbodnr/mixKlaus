@@ -24,7 +24,7 @@ class NNMFLayer(nn.Module):
         backward_method="fixed_point",
         h_update_rate=1,
         keep_h=False,
-        activate_secure_tensors=False,
+        activate_secure_tensors=True,
         return_reconstruction=False,
         convergence_threshold=0,
         solver=None,
@@ -259,7 +259,7 @@ class NNMFLayerDynamicWeight(NNMFLayer):
         h_update_rate=1,
         w_update_rate=1,
         keep_h=False,
-        activate_secure_tensors=False,
+        activate_secure_tensors=True,
         return_reconstruction=False,
         solver=None,
         convergence_threshold=0,
@@ -306,7 +306,7 @@ class NNMFDense(NNMFLayer):
         convergence_threshold=0,
         h_update_rate=1,
         keep_h=False,
-        activate_secure_tensors=False,
+        activate_secure_tensors=True,
         return_reconstruction=False,
     ):
         super().__init__(
@@ -373,7 +373,7 @@ class NNMFDenseDynamicWeight(NNMFLayerDynamicWeight, NNMFDense):
         h_update_rate=1,
         w_update_rate=1,
         keep_h=False,
-        activate_secure_tensors=False,
+        activate_secure_tensors=True,
         return_reconstruction=False,
     ):
         NNMFDense.__init__(
@@ -417,7 +417,7 @@ class NNMFConv2d(NNMFLayer):
         convergence_threshold=0,
         h_update_rate=1,
         keep_h=False,
-        activate_secure_tensors=False,
+        activate_secure_tensors=True,
         return_reconstruction=False,
     ):
         super().__init__(
@@ -555,7 +555,7 @@ class NNMFConvTransposed2d(NNMFConv2d):
         convergence_threshold=0,
         h_update_rate=1,
         keep_h=False,
-        activate_secure_tensors=False,
+        activate_secure_tensors=True,
         return_reconstruction=False,
     ):
         super().__init__(
@@ -687,7 +687,7 @@ class FPNNMFDenseDynamicWeight(FPNNMFLayerDynamicWeight, NNMFDenseDynamicWeight)
         h_update_rate=1,
         w_update_rate=1,
         keep_h=False,
-        activate_secure_tensors=False,
+        activate_secure_tensors=True,
         return_reconstruction=False,
     ):
         NNMFDenseDynamicWeight.__init__(
