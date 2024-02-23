@@ -1,4 +1,6 @@
-DEBUG=False
+import sys
 
-if DEBUG:
-    print("DEBUG mode is on. Change DEBUG to False in mixKlaus/__init__.py to turn off debugging messages.")
+if "--debug" in sys.argv:
+    DEBUG = True
+else:
+    DEBUG = False

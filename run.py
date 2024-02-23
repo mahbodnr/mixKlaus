@@ -285,6 +285,7 @@ parser.add_argument(
 parser.add_argument("--no-pin-memory", action="store_false", dest="pin_memory")
 parser.add_argument("--no-shuffle", action="store_false", dest="shuffle")
 parser.add_argument("--allow-download", action="store_true", dest="download_data")
+parser.add_argument("--debug", action="store_true", help="Enable debug mode.")
 args = parser.parse_args()
 
 # torch set default dtype
