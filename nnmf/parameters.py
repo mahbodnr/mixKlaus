@@ -9,28 +9,24 @@ class NonNegativeParameter(torch.nn.Parameter):
             raise ValueError("Negative values are not allowed in the parameter data.")
         return super(NonNegativeParameter, cls).__new__(cls, data, requires_grad=requires_grad)
 
-    def _check_negative_values(self):
-        if torch.any(self.data < 0):
+    def _check_negative_values(self, data):
+        if torch.any(data < 0):
             raise ValueError("Negative values are not allowed in the parameter data.")
 
     def __setattr__(self, name, value):
         if name == 'data':
-            self._check_negative_values()
+            self._check_negative_values(value)
             super(NonNegativeParameter, self).__setattr__(name, value)
         else:
             super(NonNegativeParameter, self).__setattr__(name, value)
 
     def __setitem__(self, key, value):
-        self._check_negative_values()
+        if type(value) is torch.Tensor:
+            self._check_negative_values(value)
+        else:
+            self._check_negative_values(torch.tensor(value))
         super(NonNegativeParameter, self).__setitem__(key, value)
 
-    def __delitem__(self, key):
-        self._check_negative_values()
-        super(NonNegativeParameter, self).__delitem__(key)
-
-    def __setstate__(self, state):
-        self._check_negative_values()
-        super(NonNegativeParameter, self).__setstate__(state)
 
 class ParameterList(torch.nn.ParameterList):
     def requires_grad_(self, requires_grad=True):
