@@ -272,7 +272,7 @@ class Net(pl.LightningModule):
                         plt.plot(torch.tensor(module.convergence).detach().cpu().numpy())
                         wandb.log({f"reconstruction_mse/{name}": fig})
                         # alpha convergence
-                        if self.hparams.alpha_iter > 0:
+                        if self.hparams.alpha_iter > 0 and hasattr(module, "alpha_convergence"):
                             fig = plt.figure()
                             plt.plot(
                                 torch.tensor(module.alpha_convergence).detach().cpu().numpy()
@@ -412,11 +412,16 @@ class Net(pl.LightningModule):
                 except Exception as e:
                     raise e
 
-    def on_train_batch_end(self, out, batch, batch_idx):
+    def optimizer_step(self, *args, **kwargs):
+        super().optimizer_step(*args, **kwargs)
+        
         for name, module in self.model.named_modules():
             # Renormalize NNMF parameters
             if hasattr(module, "normalize_weights"):
                 module.normalize_weights()
+
+    def on_train_batch_end(self, out, batch, batch_idx):
+        for name, module in self.model.named_modules():
             if hasattr(module, "forward_iterations"):
                 if module.convergence_threshold > 0:
                     self.log(

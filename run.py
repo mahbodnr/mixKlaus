@@ -32,6 +32,7 @@ parser.add_argument(
     choices=[
         "vit",
         "nnmf_mixer",
+        "alpha_mixer",
         "baseline_mixer",
         "capsule_net",
         "cnn",

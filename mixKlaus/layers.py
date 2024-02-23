@@ -8,7 +8,7 @@ from . import DEBUG
 if DEBUG:
     import debug.functional as F
 
-from nnmf.modules import NNMFLayer, NonNegativeParameter, NNMFLayerDynamicWeight
+from nnmf.modules import NNMFLayer, NNMFDense, NonNegativeParameter, NNMFLayerDynamicWeight
 from nnmf.utils import PowerSoftmax
 
 from mixKlaus.utils import anderson
@@ -299,6 +299,82 @@ class NNMFMixerEncoder(TransformerEncoder):
         return out
 
 
+class AlphaMixerEncoder(TransformerEncoder):
+    def __init__(
+        self,
+        n_iterations: int,
+        alpha_dynamics_iterations: int,
+        features: int,
+        embed_dim: int,
+        seq_len: int,
+        mlp_hidden: int,
+        output: str,
+        backward_method: str,
+        convergence_threshold: float = 0,
+        hidden_features: int | None = None,
+        hidden_seq_len: int | None = None,
+        gated: bool = False,
+        skip_connection: bool = True,
+        head: int = 8,
+        dropout: float = 0.0,
+        use_mlp: bool = True,
+        use_out_proj: bool = True,
+        normalize_input: bool = True,
+        divide_input: bool = False,
+        normalize_input_dim: int | None = -1,
+        normalize_reconstruction: bool = True,
+        normalize_reconstruction_dim: int | None = -1,
+        normalize_h: bool = True,
+        normalize_h_dim: int | None = -1,
+        h_softmax_power: float = 1,
+        ):
+        super(AlphaMixerEncoder, self).__init__(
+            features,
+            embed_dim,
+            mlp_hidden,
+            head=head,
+            dropout=dropout,
+            use_mlp=use_mlp,
+            save_attn_map=False,
+        )
+        self.attention = AplhaMixerAttentionHeads(
+            seq_len=seq_len,
+            features=features,
+            embed_dim=embed_dim,
+            heads=head,
+            n_iterations=n_iterations,
+            output=output,
+            hidden_features=hidden_features,
+            hidden_seq_len=hidden_seq_len,
+            gated=gated,
+            use_out_proj=use_out_proj,
+            backward_method=backward_method,
+            h_update_rate=1,
+            h_softmax_power=h_softmax_power,
+            keep_h=False,
+            activate_secure_tensors=True,
+            solver=anderson,
+            convergence_threshold=convergence_threshold,
+            normalize_input=normalize_input,
+            divide_input=divide_input,
+            normalize_input_dim=normalize_input_dim,
+            normalize_reconstruction=normalize_reconstruction,
+            normalize_reconstruction_dim=normalize_reconstruction_dim,
+            normalize_h=normalize_h,
+            normalize_h_dim=normalize_h_dim,
+            alpha_dynamics_iterations=alpha_dynamics_iterations,
+        )
+        self.skip_connection = skip_connection
+
+    def forward(self, x):
+        out = self.attention(x)
+        if self.skip_connection:
+            out = out + x
+        if self.mlp is not None:
+            out = self.mlp(self.la2(out)) + out
+        return out
+
+
 class NNMFMixerAttentionHeads(NNMFLayer):
     def __init__(
         self,
@@ -368,7 +444,7 @@ class NNMFMixerAttentionHeads(NNMFLayer):
             torch.rand(self.hidden_features // heads, embed_dim // heads)
         )
         self.global_weight: NonNegativeParameter = NonNegativeParameter(
-            torch.rand(self.hidden_seq_len, seq_len)
+            torch.rand(self.heads, self.hidden_seq_len, seq_len)
         )
 
         self.gated = gated
@@ -392,7 +468,7 @@ class NNMFMixerAttentionHeads(NNMFLayer):
     def normalize_weights(self) -> None:
         for weight in [self.local_weight, self.global_weight]:
             weight_data = F.normalize(
-                weight.data, p=1, dim=1
+                weight.data, p=1, dim=-1
             )  # May contain negative values if Madam not used
             torch.clamp(
                 weight_data,
@@ -400,7 +476,7 @@ class NNMFMixerAttentionHeads(NNMFLayer):
                 max=None,
                 out=weight.data,
             )
-            weight.data = F.normalize(weight.data, p=1, dim=1)
+            weight.data = F.normalize(weight.data, p=1, dim=-1)
 
     def _reset_h(self, x):
         self.h = torch.rand(
@@ -416,12 +492,12 @@ class NNMFMixerAttentionHeads(NNMFLayer):
             self.h = F.normalize(self.h, p=1, dim=self.normalize_h_dim)
 
     def _reconstruct(self, h):
-        h = torch.einsum("bohf,oi->bihf", h, self.global_weight)
+        h = torch.einsum("bohf,hoi->bihf", h, self.global_weight)
         return F.linear(h, self.local_weight.t())
 
     def _forward(self, x):
         x = F.linear(x, self.local_weight)
-        return torch.einsum("bihf,oi->bohf", x, self.global_weight)
+        return torch.einsum("bihf,hoi->bohf", x, self.global_weight)
 
     def _process_h(self, h):
         h = self._secure_tensor(h)
@@ -924,6 +1000,129 @@ class NNMFMixerAttentionHeadsConvDynamicWeights(
         assert (self.local_weight >= 0).all(), self.local_weight.min()
         assert (input >= 0).all(), input.min()
 
+
+class AplhaMixerAttentionHeads(nn.Module):
+    def __init__(
+        self,
+        seq_len: int,
+        features: int,
+        embed_dim: int,
+        heads: int,
+        n_iterations: int,
+        alpha_dynamics_iterations: int,
+        output: str,
+        hidden_features: int | None = None,
+        hidden_seq_len: int | None = None,
+        gated: bool = False,
+        use_out_proj: bool = True,
+        backward_method: str = "fixed_point",
+        h_update_rate: float = 1,
+        h_softmax_power: float = 1,
+        keep_h: bool = False,
+        activate_secure_tensors: bool = True,
+        solver=None,
+        convergence_threshold=0,
+        normalize_input=True,
+        divide_input=False,
+        normalize_input_dim=-1,
+        normalize_reconstruction=True,
+        normalize_reconstruction_dim=-1,
+        normalize_h=True,
+        normalize_h_dim=-1,
+    ):
+        super().__init__()
+        self.threshold: float = 0.00001
+        assert alpha_dynamics_iterations > 0, "Alpha dynamics iterations should be greater than 0"
+        self.alpha_dynamics_iterations = alpha_dynamics_iterations
+        self.heads: int = heads
+        assert output in ["reconstruction", "hidden"]
+        self.output: str = output
+        self.features: int = features
+        self.seq_len: int = seq_len
+        self.embed_dim: int = embed_dim
+        self.hidden_features: int = (
+            embed_dim if hidden_features is None else hidden_features
+        )
+        assert self.hidden_features > heads and (
+            self.hidden_features % heads == 0
+        ), f"Incompatible hidden features: {self.hidden_features}, having heads: {heads}"
+        self.hidden_seq_len: int = seq_len if hidden_seq_len is None else hidden_seq_len
+        self.divide_input = divide_input
+        self.normalize_h = normalize_h
+        self.normalize_h_dim = normalize_h_dim
+        self.power_softmax = PowerSoftmax(h_softmax_power, dim=self.normalize_h_dim)
+
+        self.embed = nn.Linear(features, embed_dim)
+
+        self.nnmf_layer = NNMFDense(
+            in_features= embed_dim // heads, #E
+            out_features=self.hidden_features // heads, # D
+            n_iterations=n_iterations,
+            backward_method=backward_method,
+            solver=solver,
+            convergence_threshold=convergence_threshold,
+            h_update_rate=h_update_rate,
+            keep_h=keep_h,
+            activate_secure_tensors=activate_secure_tensors,
+            return_reconstruction=True,
+            normalize_input=normalize_input,
+            normalize_input_dim=normalize_input_dim,
+            normalize_reconstruction=normalize_reconstruction,
+            normalize_reconstruction_dim=normalize_reconstruction_dim,
+        )
+
+        self.alpha_init: NonNegativeParameter = NonNegativeParameter(
+                torch.ones(1, self.heads, self.hidden_seq_len, self.seq_len), requires_grad=False
+        )
+
+        self.gated = gated
+        if self.gated:
+            self.gate = nn.Linear(features, embed_dim)
+            self.gate_activation = nn.SiLU()
+
+        self.use_out_proj = use_out_proj
+        if self.use_out_proj:
+            self.out_project = nn.Linear(embed_dim, features)
+
+        self.save_attn_map = False
+
+    def _prepare_input(self, input):
+        if self.normalize_input:
+            input = F.normalize(input, p=1, dim=self.normalize_input_dim, eps=1e-20)
+        if self.divide_input:
+            input = input / input.shape[1]
+        return input
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.gated:
+            z = self.gate_activation(self.gate(x))
+        x = self.embed(x)
+        x = torch.clamp(x, min=MINIMUM_POSITIVE)
+        x = x.reshape(x.shape[0], x.shape[1], self.heads, -1)  # B, T, H, D
+        h, reconstruct = self.nnmf_layer(x)
+        if self.normalize_h:
+            h = F.normalize(h, p=1, dim=self.normalize_h_dim)
+        x = self.alpha_dynamics(h, self.nnmf_layer.prepared_input, reconstruct)
+        x = x.flatten(-2)
+        if self.gated:
+            x = x * z
+        if self.use_out_proj:
+            x = self.out_project(x)
+        return x
+
+    def alpha_dynamics(self, h, input, h_reconstruction):
+        alpha = self.alpha_init.clone().repeat(h.shape[0], 1, 1, 1)
+        h_rec_input = h_reconstruction * input
+        self.alpha_convergence = []
+        for _ in range(self.alpha_dynamics_iterations):
+            h_mixed = torch.einsum("bohf,bhoi->bihf", h, alpha)
+            alpha_reconstruction = self.nnmf_layer._reconstruct(h_mixed)
+            alpha_reconstruction_inv = 1 / (alpha_reconstruction + 1e-20)
+            new_alpha = alpha * torch.einsum("bohf,bihf->bhoi", h_rec_input, alpha_reconstruction_inv)
+            self.alpha_convergence.append(F.mse_loss(alpha, new_alpha))
+            alpha = new_alpha
+
+        return torch.einsum("bohf,bhoi->bihf", h, alpha)
 
 class BaselineMixerAttentionHeads(nn.Module):
     def __init__(self, features, embed_dim, seq_len, heads):

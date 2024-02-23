@@ -120,6 +120,48 @@ def get_model(args):
             h_softmax_power=args.h_softmax_power,
             convergence_threshold=args.convergence_threshold,
         )
+    elif args.model_name == "alpha_mixer":
+        from mixKlaus.vit import AlphaMixer
+
+        net = AlphaMixer(
+            conv=args.use_conv,
+            dynamic_weight=args.use_dynamic_weight,
+            kernel_size=args.kernel_size,
+            stride=args.stride,
+            padding=args.conv_padding,
+            nnmf_iterations=args.md_iter,
+            nnmf_output=args.nnmf_output,
+            nnmf_backward=args.nnmf_backward,
+            alpha_dynamics_iterations=args.alpha_iter,
+            in_c=args.in_c,
+            num_classes=args.num_classes,
+            img_size=args.size,
+            patch=args.patch,
+            dropout=args.dropout,
+            num_layers=args.num_layers,
+            hidden=args.hidden,
+            nnmf_hidden=args.nnmf_hidden,
+            nnmf_seq_len=args.nnmf_seq_len,
+            embed_dim=args.embed_dim,
+            gated=args.gated,
+            encoder_mlp=args.use_encoder_mlp,
+            mlp_hidden=args.mlp_hidden,
+            nnmf_skip_connection=args.nnmf_skip_connection,
+            head=args.head,
+            is_cls_token=args.is_cls_token,
+            pos_emb=args.pos_emb,
+            output_mode=args.output_mode,
+            normalize_input=args.normalize_input,
+            divide_input=args.divide_input,
+            normalize_input_dim=args.normalize_input_dim,
+            normalize_reconstruction=args.normalize_reconstruction,
+            normalize_reconstruction_dim=args.normalize_reconstruction_dim,
+            normalize_hidden=args.normalize_hidden,
+            normalize_hidden_dim=args.normalize_hidden_dim,
+            h_softmax_power=args.h_softmax_power,
+            convergence_threshold=args.convergence_threshold,
+        )
+
     elif args.model_name == "baseline_mixer":
         from mixKlaus.vit import BaselineMixer
 

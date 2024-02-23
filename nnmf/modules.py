@@ -80,6 +80,7 @@ class NNMFLayer(nn.Module):
         self.convergence = None
         self.reconstruction_mse = None
         self.forward_iterations = None
+        self.prepared_input = None
 
     def _secure_tensor(self, t):
         return t.clamp_min(SECURE_TENSOR_MIN) if self.activate_secure_tensors else t
@@ -138,6 +139,9 @@ class NNMFLayer(nn.Module):
         self.normalize_weights()
         self._check_forward(input)
         input= self._prepare_input(input)
+
+        # save the processed input to be accessed if needed
+        self.prepared_input = input
 
         if (not self.keep_h) or (self.h is None):
             self._reset_h(input)
@@ -308,6 +312,10 @@ class NNMFDense(NNMFLayer):
         keep_h=False,
         activate_secure_tensors=True,
         return_reconstruction=False,
+        normalize_input=True,
+        normalize_input_dim=-1,
+        normalize_reconstruction=True,
+        normalize_reconstruction_dim=-1,
     ):
         super().__init__(
             n_iterations,
@@ -318,10 +326,10 @@ class NNMFDense(NNMFLayer):
             return_reconstruction,
             solver=solver,
             convergence_threshold=convergence_threshold,
-            normalize_input=True,
-            normalize_input_dim=1,
-            normalize_reconstruction=True,
-            normalize_reconstruction_dim=1,
+            normalize_input=normalize_input,
+            normalize_input_dim=normalize_input_dim,
+            normalize_reconstruction=normalize_reconstruction,
+            normalize_reconstruction_dim=normalize_reconstruction_dim,
         )
         self.in_features = in_features
         self.out_features = out_features
@@ -335,7 +343,8 @@ class NNMFDense(NNMFLayer):
         self.weight.data = F.normalize(self.weight.data, p=1, dim=1)
 
     def _reset_h(self, x):
-        self.h = F.normalize(torch.ones(x.shape[0], self.out_features), p=1, dim=1).to(
+        h_shape = x.shape[:-1] + (self.out_features,)
+        self.h = F.normalize(torch.ones(h_shape), p=1, dim=1).to(
             x.device
         )
 
@@ -357,8 +366,12 @@ class NNMFDense(NNMFLayer):
         assert (self.weight >= 0).all(), self.weight.min()
         assert (input >= 0).all(), input.min()
 
+    @torch.no_grad()
     def normalize_weights(self):
-        self.weight.data = F.normalize(self.weight.data, p=1, dim=1)
+        # weights may contain negative values after optimizer updates
+        normalized_weight = F.normalize(self.weight.data, p=1, dim=-1)
+        pos_weight = normalized_weight.clamp(min=SECURE_TENSOR_MIN) 
+        self.weight.data = F.normalize(pos_weight, p=1, dim=-1)
 
 
 class NNMFDenseDynamicWeight(NNMFLayerDynamicWeight, NNMFDense):
@@ -419,6 +432,10 @@ class NNMFConv2d(NNMFLayer):
         keep_h=False,
         activate_secure_tensors=True,
         return_reconstruction=False,
+        normalize_input=True,
+        normalize_input_dim=(1, 2, 3),
+        normalize_reconstruction=True,
+        normalize_reconstruction_dim=(1, 2, 3),
     ):
         super().__init__(
             n_iterations,
@@ -429,10 +446,10 @@ class NNMFConv2d(NNMFLayer):
             return_reconstruction,
             solver=solver,
             convergence_threshold=convergence_threshold,
-            normalize_input=True,
-            normalize_input_dim=(1, 2, 3),
-            normalize_reconstruction=True,
-            normalize_reconstruction_dim=(1, 2, 3),
+            normalize_input=normalize_input,
+            normalize_input_dim=normalize_input_dim,
+            normalize_reconstruction=normalize_reconstruction,
+            normalize_reconstruction_dim=normalize_reconstruction_dim,
         )
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -458,7 +475,8 @@ class NNMFConv2d(NNMFLayer):
         self.weight.data = F.normalize(self.weight.data, p=1, dim=(1, 2, 3))
 
     def normalize_weights(self):
-        self.weight.data = F.normalize(self.weight.data, p=1, dim=(1, 2, 3))
+        normalized_weight = F.normalize(self.weight.data, p=1, dim=(1, 2, 3))
+        self.weight.data = F.normalize(normalized_weight.clamp(min=SECURE_TENSOR_MIN), p=1, dim=(1, 2, 3))
 
     def _reconstruct(self, h):
         return F.conv_transpose2d(
